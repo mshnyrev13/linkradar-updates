@@ -1,0 +1,65 @@
+name: Update public version feed
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: linkradar-public-feed
+  cancel-in-progress: false
+jobs:
+  update:
+    if: github.event_name == 'workflow_dispatch' || (!github.event.release.prerelease && !github.event.release.draft)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish version after checking downloadable installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, json, os, re, urllib.error, urllib.request
+          repo = os.environ['GH_REPO']
+          assert repo == 'mshnyrev13/linkradar-updates'
+          api = 'https://api.github.com/repos/' + repo
+          def request(path, data=None):
+              body = None if data is None else json.dumps(data).encode()
+              req = urllib.request.Request(api + path, data=body,
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github+json',
+                           'X-GitHub-Api-Version': '2022-11-28',
+                           'Content-Type': 'application/json'},
+                  method='GET' if data is None else 'PUT')
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  return json.load(response)
+          release = request('/releases/latest')
+          match = re.fullmatch(r'v?(\d{1,6}\.\d{1,6}\.\d{1,6})', release['tag_name'])
+          assert match and not release['draft'] and not release['prerelease']
+          version = match[1]
+          expected = {f'LinkRadar-{version}-macOS-arm64.dmg', f'LinkRadar-{version}-Windows-x64.zip', 'SHA256SUMS.txt'}
+          assert expected <= {asset['name'] for asset in release['assets'] if asset['state'] == 'uploaded'}
+          link = 'https://github.com/' + repo + '/releases/tag/' + release['tag_name']
+          assert release['html_url'] == link
+          content = json.dumps({'version': version, 'download_url': link}, indent=2) + '\n'
+          try:
+              previous = request('/contents/latest.json?ref=main')
+          except urllib.error.HTTPError as error:
+              if error.code != 404: raise
+              previous = None
+          if previous:
+              old_text = base64.b64decode(previous['content']).decode()
+              old = json.loads(old_text)
+              assert tuple(map(int, version.split('.'))) >= tuple(map(int, old['version'].split('.')))
+              if old_text == content:
+                  print('Public feed already current: ' + version)
+                  raise SystemExit(0)
+          change = {'message': 'Publish LinkRadar ' + version + ' update metadata',
+                    'content': base64.b64encode(content.encode()).decode(), 'branch': 'main'}
+          if previous: change['sha'] = previous['sha']
+          request('/contents/latest.json', change)
+          readback = request('/contents/latest.json?ref=main')
+          assert base64.b64decode(readback['content']).decode() == content
+          print('Public feed verified: ' + version)
+          PY
