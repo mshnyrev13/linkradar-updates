@@ -1,13 +1,18 @@
 # Проверки LinkRadar 2.10.10
 
-Исправления Windows CI проверены на исходном коде bfdbf7e2e475f91f85ebe2dc792bcdf132b3a56b:
-https://github.com/mshnyrev13/vcs-network-watch/actions/runs/39749122346
+[Публичная CI исходников](https://github.com/mshnyrev13/linkradar-updates/actions/runs/39751797812), код 59773c3c7099e8a711f2170292e1436f2f649b26.
 
-- Windows: 391 unit, 31 skipped; 6 integration, 1 skipped; JS и pip-audit — success.
-- macOS: 391 unit, 14 skipped; 6 integration, 1 skipped; JS и pip-audit — success.
-- Исправлены тесты owner/DACL, синхронизация snapshot/БД и подготовка рабочего стола одноразовой Windows CI. Продуктовые ACL и расчёты не ослаблены.
-- Исправлена реальная минимальная высота Windows: справка доступна через шестерёнку, окно 900×640.
+| Проверка | Результат |
+| --- | --- |
+| Windows, native Qt | 391 unit / 64,329 с / 31 skipped / OK; 6 integration / 6,405 с / 1 skipped / OK |
+| Windows, зависимости и JavaScript | pip-audit: уязвимостей не найдено; оба JS-набора OK |
+| Локальный Mac, offscreen | 391 unit / 37,868 с / 12 skipped / OK; 6 integration / 4,609 с / OK; оба JS-набора OK |
+| Mac app через Finder/LaunchServices | 2.10.10, LIVE, ya.ru 24/24 ответа, 0 потерь/локальных ошибок |
+| Упаковка | macOS codesign и DMG checksum OK; Windows ZIP CRC OK; 57 исходных файлов обоих build manifest совпали; все Windows .py соответствуют исходникам |
+| Публикация | SHA256 трёх архивов совпали с GitHub; скачивание без авторизации HTTP 200; канал 2.10.10; UpdateChecker предлагает обновление из 2.10.9 и не предлагает повторное для 2.10.10 |
 
-Для публичного переноса обновлены версия и адрес проекта, внутренние имена в тестовых примерах заменены учебными. Новая CI запускается в этом репозитории.
+macOS job публичной CI ожидала runner на момент фиксации; актуальное состояние по ссылке выше. Локальные Mac-проверки завершены. Пропуски платформенные/необязательные, в том числе TShark на Windows runner.
 
-Ограничения: Windows portable EXE/Npcap/SYSTEM-служба и реальный USB не проверялись этим выпуском на Windows; подпись macOS ad hoc, без notarization.
+Исправлены фактическая минимальная высота Windows (900×640, справка через шестерёнку), тесты owner/DACL, освобождение Qt/SQLite, синхронизация snapshot/БД и TCP-фикстура. Продуктовые ACL, таймауты и расчёты не ослаблены.
+
+Ограничения: выполнение portable EXE/Npcap/SYSTEM-службы и реального USB на Windows не проверено этим выпуском. macOS: Apple Silicon, 15+, подпись ad hoc без Developer ID/notarization. Loopback ICMP на тестовом Mac не ответил и приложению, и системному ping; публичная цель ответила обоим. Пользовательские настройки ОС не менялись.
