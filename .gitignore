@@ -1,0 +1,48 @@
+# Measurements, sessions, captures and credentials
+/data/
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.log
+*.pcap
+*.pcapng
+service.key
+service.sock
+service-user.sid
+*.lock
+.env
+.env.*
+*.pem
+*.key
+*-session-example.txt
+
+# Local diagnostic captures and screenshots (branding remains tracked)
+/*.png
+/*.jpg
+/*.jpeg
+/validation-*.json
+
+# Python environments and caches
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build outputs and downloadable release artifacts
+build/
+dist/
+*.spec
+*.dmg
+*.zip
+*.app/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
