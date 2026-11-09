@@ -28,3 +28,6 @@ CompactValue имеет прямое контекстное копировани
 
 
 Проверка 2.10.11 завершена: 408 unit / 39,538 с / 14 skipped; integration 6 / 4,530 с / 1 skipped; JS OK. Finder feedback scenario, cwd /: оба TXT/ошибка-повтор/Copy/Graphene OK, окна 900×640 и 1100×760; реальный ping ya.ru 17/17. codesign/DMG/ZIP CRC и 58 manifest inputs проверены. Подробности VALIDATION-2.10.11.md. Windows execution и проблемный корпоративный порт не проверены; установленная app и публичные релизы не менялись.
+
+
+9 ноября 2026: версия 2.10.11 опубликована в https://github.com/mshnyrev13/linkradar-updates/releases/tag/v2.10.11. Тег и точный source ZIP — 40fbc0b657a93e8192b34abbf145ace9c869132c, дерево e46c686ffb45bb7d1e18f8167995d3cc22b4a9b8, 145 файлов. CI 42603159164 обе платформы success, по 408 unit и 6 integration; Windows-тесты исправлены на явное чтение UTF-8. DMG/Windows ZIP при этой правке не менялись. Все 4 assets проверены по SHA256/размеру, анонимные HEAD 200; SHA256SUMS.txt совпал побайтно. Канал latest.json обновлён штатным workflow_dispatch 42604919503 success, commit 939214f; из 2.10.10 предлагается 2.10.11, текущей версии повтор не предлагается. Установленная app/службы не заменялись.

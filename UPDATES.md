@@ -20,7 +20,7 @@
 
 `mshnyrev13/linkradar-updates` содержит актуальные исходники, тесты, инструкции,
 пакеты в Releases и latest.json. Токен GitHub на компьютере техника не нужен.
-Старый vcs-network-watch сохраняет историю разработки до объединения.
+Старый vcs-network-watch удалён владельцем после объединения; актуальные исходники и выпуски находятся здесь.
 
 Адрес канала: https://raw.githubusercontent.com/mshnyrev13/linkradar-updates/main/latest.json
 
