@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QApplication,QComboBox,QFileDialog,QHBoxLayout,QH
 from time_labels import format_timestamp
 import error_log
 import export_transfer
+import text_export
 from log_widgets import update_lines,format_events
 from plot_sampling import chart_samples,nearest_point,axis_label,nice_scale
 from plot_widgets import CachedPlot
@@ -311,7 +312,8 @@ class StreamPanel(QWidget):
     def copy_report(self):
         self.start_report()
     def save_report(self):
-        path,_=QFileDialog.getSaveFileName(self,'Отчёт о трансляции',f'Stream-report-{time.strftime("%Y%m%d-%H%M%S")}.txt','Текст (*.txt)')
+        if self.closing or self.report_pending:return
+        path=text_export.choose_path(self,'Отчёт о трансляции',f'Stream-report-{time.strftime("%Y%m%d-%H%M%S")}.txt')
         if not path:return
         self.start_report(path)
     def start_report(self,path=None):
@@ -343,7 +345,8 @@ class StreamPanel(QWidget):
         self.copy_button.setText('Копировать');self.save_button.setText('Сохранить TXT…')
         if error:
             error_log.error('Подготовка отчёта Stream',error)
-            QMessageBox.warning(self,'Ошибка отчёта','Не удалось подготовить или сохранить отчёт. Проверьте путь и повторите.');return
+            QMessageBox.warning(self,'Ошибка отчёта',export_transfer.save_error(error) if self.report_path else 'Не удалось подготовить отчёт. Повторите попытку; подробности — в журнале ошибок.');return
+        if self.report_path:text_export.remember_path(self,self.report_path)
         if not self.report_path:
             QApplication.clipboard().setText(result);self.copy_button.setText('Скопировано')
             QTimer.singleShot(1200,self.reset_copy_caption)

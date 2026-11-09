@@ -9,7 +9,7 @@ import queue
 from pathlib import Path
 from urllib.parse import urlsplit
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QRectF, QUrl, QtMsgType, qInstallMessageHandler
-from PySide6.QtGui import QPainter, QColor, QPen, QIcon, QPainterPath, QDesktopServices, QAction
+from PySide6.QtGui import QPainter, QColor, QPen, QIcon, QPainterPath, QDesktopServices, QAction, QKeySequence
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QComboBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QPlainTextEdit, QToolButton, QMessageBox, QStyledItemDelegate, QGridLayout, QSplitter, QSizePolicy, QFileDialog, QTabWidget, QMenuBar, QMenu)
@@ -20,6 +20,7 @@ import network_info
 import speed_test
 import session_export
 import export_transfer
+import text_export
 import ui_tasks
 import update_checker
 from log_widgets import update_lines,format_events
@@ -71,6 +72,7 @@ class Snapshot(QThread):
 
 class ExportWorker(QThread):
     failed=Signal(str)
+    succeeded=Signal(str)
     def __init__(self,store,service,sid,path,names,barrier=None,warning=None):
         super().__init__();self.store=store;self.service=service;self.sid=sid;self.path=path;self.names=names;self.stop=threading.Event();self.barrier=barrier;self.warning=warning
     def run(self):
@@ -88,9 +90,10 @@ class ExportWorker(QThread):
                         wrapper.write(prefix);session_export.write_txt(self.store,self.sid,wrapper,self.names,self.stop)
                     finally:wrapper.flush();wrapper.detach()
                 export_transfer.atomic_write(self.path,write)
+            self.succeeded.emit(str(self.path))
         except InterruptedError:pass
         except Exception as exc:
-            error_log.error('Экспорт TXT',exc);self.failed.emit(str(exc))
+            error_log.error('Экспорт TXT',exc);self.failed.emit(export_transfer.save_error(exc))
 
 class Discovery(QThread):
     ready=Signal(object)
@@ -299,7 +302,23 @@ class ProgressButton(QPushButton):
         painter.setPen(QColor('#f8fafc'));painter.drawText(self.rect().adjusted(7,0,-7,0),Qt.AlignmentFlag.AlignCenter,self.fontMetrics().elidedText(self.text(),Qt.TextElideMode.ElideRight,self.width()-14))
 
 class CompactValue(QLabel):
+    def setText(self,text):
+        if text!=self.text():super().setText(text)
+    def copy_value(self):
+        QApplication.clipboard().setText(self.text())
+    def contextMenuEvent(self,event):
+        # Snapshot the full value: discovery can update the widget while the
+        # menu is open. Copy must correspond to the value the user clicked.
+        value=self.text();menu=QMenu(self)
+        action=menu.addAction('Скопировать значение');action.setEnabled(bool(value and value!='—'))
+        action.triggered.connect(lambda checked=False:QApplication.clipboard().setText(value))
+        menu.exec(event.globalPos());menu.deleteLater()
+    def keyPressEvent(self,event):
+        if event.matches(QKeySequence.StandardKey.Copy):
+            QApplication.clipboard().setText(self.selectedText() or self.text());event.accept();return
+        super().keyPressEvent(event)
     def paintEvent(self,event):
+        if self.hasSelectedText():super().paintEvent(event);return
         painter=QPainter(self);painter.setPen(QColor('#dce6f4'))
         painter.drawText(self.rect(),Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter,self.fontMetrics().elidedText(self.text(),Qt.TextElideMode.ElideRight,self.width()))
 
@@ -385,7 +404,7 @@ class Window(QMainWindow):
         network_grid=QGridLayout();network_grid.setContentsMargins(0,0,0,0);network_grid.setVerticalSpacing(2);network_grid.setHorizontalSpacing(6);self.network_fields={}
         for i,key in enumerate(['switch','port','vlan','ip','mask','gateway','dns','mac']):
             title=QLabel({'switch':'Switch:','port':'Port:','vlan':'VLAN:','ip':'IP:','mask':'MASK:','gateway':'GATEWAY:','dns':'DNS:','mac':'MAC:'}[key]);title.setStyleSheet('color:#91a2bb;font-size:10px;')
-            value=CompactValue('—');value.setMinimumHeight(14);value.setStyleSheet('font-size:11px;');value.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred);value.setTextFormat(Qt.TextFormat.PlainText);value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse);value.setWordWrap(False);self.network_fields[key]=value
+            value=CompactValue('—');value.setMinimumHeight(14);value.setStyleSheet('font-size:11px;');value.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred);value.setTextFormat(Qt.TextFormat.PlainText);value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse|Qt.TextInteractionFlag.TextSelectableByKeyboard);value.setWordWrap(False);self.network_fields[key]=value
             network_grid.addWidget(title,i,0);network_grid.addWidget(value,i,1)
         network_grid.setColumnStretch(1,1)
         self.network_layout.addLayout(network_grid)
@@ -492,6 +511,8 @@ class Window(QMainWindow):
         if self.sid:return
         try:
             data=json.loads((self.folder/'ui-preferences.json').read_text())
+            directory=data.get('export_directory')
+            if isinstance(directory,str) and Path(directory).is_absolute():self.setProperty(text_export.DIRECTORY_PROPERTY,directory)
             for name in ('interval','period'):
                 field=getattr(self,name);index=field.findData(data.get(name))
                 if index>=0:field.blockSignals(True);field.setCurrentIndex(index);field.blockSignals(False)
@@ -505,7 +526,7 @@ class Window(QMainWindow):
             if self.discovery:self.discovery.selected=self.selected_interface
         except (OSError,ValueError,TypeError):pass
     def save_preferences(self):
-        data=dict(interface=self.selected_interface,interval=self.interval.currentData(),period=self.period.currentData(),size=[self.width(),self.height()])
+        data=dict(interface=self.selected_interface,interval=self.interval.currentData(),period=self.period.currentData(),size=[self.width(),self.height()],export_directory=self.property(text_export.DIRECTORY_PROPERTY))
         try:export_transfer.atomic_write(self.folder/'ui-preferences.json',lambda output:output.write(json.dumps(data).encode()))
         except OSError as exc:error_log.error('Сохранение настроек окна',exc,key='preferences')
     def offer_update(self,release):
@@ -820,7 +841,8 @@ class Window(QMainWindow):
             self.port_pending.update(pending);self.record('graphene',None,None,rows,done=saved)
     def export_session(self):
         if not self.sid:QMessageBox.information(self,'Экспорт','Сначала запустите проверку');return
-        path,_=QFileDialog.getSaveFileName(self,'Экспорт полной сессии',f'LinkRadar-{time.strftime("%Y%m%d-%H%M%S")}.txt','Текст (*.txt)')
+        if self.export_worker and self.export_worker.isRunning():return
+        path=text_export.choose_path(self,'Экспорт полной сессии',f'LinkRadar-{time.strftime("%Y%m%d-%H%M%S")}.txt')
         if not path:return
         if self.export_worker and self.export_worker.isRunning():return
         names={h['ip']:h.get('name') for t in self.snapshot.get('targets',[]) for h in t.get('hops',[]) if h.get('ip')}
@@ -834,9 +856,12 @@ class Window(QMainWindow):
         self.export_worker=ExportWorker(self.store,self.service,self.sid,path,names,barrier,lambda:self.data_error or (self.io.data_error if self.io else None))
         self.export_action.setEnabled(False);self.export_action.setText('Сохраняем TXT…')
         self.export_worker.failed.connect(self.export_failed)
+        self.export_worker.succeeded.connect(self.export_succeeded)
         self.export_worker.finished.connect(self.export_finished);self.export_worker.start()
     def export_failed(self,message):
         if not self.closing:QMessageBox.warning(self,'Ошибка экспорта',message)
+    def export_succeeded(self,path):
+        if not self.closing:text_export.remember_path(self,path)
     def export_finished(self):
         self.export_action.setEnabled(True);self.export_action.setText('Экспорт TXT')
     def open_errors(self,service=False):
@@ -1133,7 +1158,10 @@ def main():
                     for target in snapshot.get('targets',[])]}
                 Path(sys.argv[sys.argv.index('--smoke-report')+1]).write_text(json.dumps(report,ensure_ascii=False),encoding='utf-8')
             print('Native window and monitoring:',bool(window.monitor.sid),flush=True);window.close()
-        if '--smoke-scenario' in sys.argv:
+        if '--smoke-feedback' in sys.argv:
+            import smoke_scenarios
+            smoke_scenarios.feedback(window,folder,option_value(sys.argv,'--smoke-report'))
+        elif '--smoke-scenario' in sys.argv:
             import smoke_scenarios
             smoke_scenarios.start(window,folder,sys.argv[sys.argv.index('--smoke-report')+1],stream_report='--smoke-stream-report' in sys.argv)
         elif '--smoke-speed' in sys.argv:

@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import ssl
 import build_manifest
 
 
@@ -21,6 +22,11 @@ def main():
     from server import VERSION
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    # Some CPython distributions use an on-disk CA deny list in ssl.py.
+    # Preserve that policy in a frozen app rather than dropping it or leaving
+    # SSLContext dependent on a file outside the standalone bundle.
+    ca_policy = Path(ssl.__file__).with_name('codex-rejected-cas.pem')
+    runtime_data = ['--add-data', f'{ca_policy}:.'] if ca_policy.is_file() else []
     subprocess.run([
         sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
         '--windowed', '--onedir', '--name', 'LinkRadar',
@@ -32,8 +38,7 @@ def main():
         '--add-data', f'{root / "packaging"}:packaging',
         '--collect-data', 'certifi', '--copy-metadata', 'truststore',
         '--copy-metadata', 'PySide6-Essentials', '--copy-metadata', 'shiboken6',
-        str(root / 'desktop.py'),
-    ], cwd=root, check=True)
+    ] + runtime_data + [str(root / 'desktop.py')], cwd=root, check=True)
     app = output / 'dist/LinkRadar.app'
     # UDP readiness through Network.framework triggers/waits for the ordinary
     # Local Network decision before native ICMP starts. No root or extra grants.
@@ -48,8 +53,8 @@ def main():
     plist.write_bytes(plistlib.dumps(info))
     documentation = app / 'Contents/Resources/Documentation'
     documentation.mkdir(parents=True, exist_ok=True)
-    build_manifest.save(root,documentation/'BUILD-MANIFEST.json',VERSION,platform='macOS-arm64',minimum_macos='15.0',signing='ad-hoc')
-    for source, name in [('RELEASE-NOTES-2.10.10.md', 'RELEASE-NOTES-2.10.10.md'), ('README-macOS.md', 'README.md'),
+    build_manifest.save(root,documentation/'BUILD-MANIFEST.json',VERSION,platform='macOS-arm64',minimum_macos='15.0',signing='ad-hoc',runtime_ca_policy_sha256=build_manifest.digest(ca_policy) if ca_policy.is_file() else None)
+    for source, name in [('RELEASE-NOTES-2.10.11.md', 'RELEASE-NOTES-2.10.11.md'), ('RELEASE-NOTES-2.10.10.md', 'RELEASE-NOTES-2.10.10.md'), ('README-macOS.md', 'README.md'),
                          ('STANDALONE.md', 'STANDALONE.md'), ('STREAM.md', 'STREAM.md'),
                          ('SECURITY-AUDIT.md','SECURITY-AUDIT.md'),
                          ('SPEED-AUDIT.md','SPEED-AUDIT.md'),

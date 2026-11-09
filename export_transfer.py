@@ -5,8 +5,20 @@ import os
 import time
 from pathlib import Path
 import tempfile
+import errno
 
 CHUNK=256*1024
+
+def save_error(error):
+    """Explain write failures without exposing temporary-file implementation details."""
+    if isinstance(error,OSError):
+        if error.errno in (errno.EROFS,errno.EACCES,errno.EPERM) or getattr(error,'winerror',None)==5:
+            return 'В выбранную папку нельзя записать файл. Выберите другую папку (например «Загрузки») и повторите экспорт. Данные сессии сохранены в приложении.'
+        if error.errno==errno.ENOSPC:
+            return 'Недостаточно места на диске. Освободите место или выберите другой диск и повторите экспорт.'
+        if error.errno in (errno.ENOENT,errno.ENOTDIR):
+            return 'Папка сохранения недоступна. Выберите существующую папку и повторите экспорт.'
+    return 'Не удалось сохранить TXT. Повторите экспорт. Подробности доступны в журнале ошибок.'
 
 class Sender:
     def __init__(self,connection):

@@ -68,3 +68,87 @@ def start(window,folder,report,stream_report=False):
                 advance('Stream TXT готов; окно отвечало во время подготовки');close()
         except Exception as exc:state['error']=type(exc).__name__+': '+str(exc);write();close()
     timer=QTimer(w);timer.timeout.connect(tick);timer.start(150);w.acceptance_timer=timer;write()
+
+
+def feedback(window,folder,report_path):
+    """Disposable packaged-app regression with synthetic fields and native cwd.
+
+    Only called with --smoke-test --smoke-feedback. Dialog answers and clipboard
+    are controlled; the user's clipboard, installed profile and permissions are
+    untouched. The export itself uses the actual workers and session database.
+    """
+    import errno
+    import os
+    from unittest.mock import patch
+    import desktop
+    import export_transfer
+    import text_export
+    folder=Path(folder);out=folder/'exports';out.mkdir()
+    window.setProperty(text_export.DIRECTORY_PROPERTY,str(out))
+    window.monitor.pause(window.sid)
+    target=out/'Учебная сессия.txt';target.write_text('old report',encoding='utf-8')
+    result=dict(version=desktop.server.VERSION,cwd=os.getcwd(),synthetic=True,checks={},screenshots=[])
+    state={'stage':0};started=time.monotonic()
+    timer=QTimer(window);timer.setInterval(50);window.feedback_timer=timer
+    def export(deny=False):
+        with patch.object(QFileDialog,'getSaveFileName',return_value=(target.name,'Текст')):
+            if deny:
+                # Start the worker with a failing writer, not a global patch
+                # that could affect another thread or the preference file.
+                original=export_transfer.atomic_write
+                def denied(path,writer):
+                    if Path(path)==target:raise OSError(errno.EROFS,'synthetic read-only directory')
+                    return original(path,writer)
+                state['deny_patch']=patch.object(export_transfer,'atomic_write',side_effect=denied);state['deny_patch'].start()
+                state['warning_patch']=patch.object(desktop.QMessageBox,'warning');state['warning']=state['warning_patch'].start()
+            window.export_session()
+    def done(error=None):
+        timer.stop()
+        if 'deny_patch' in state:state.pop('deny_patch').stop();state.pop('warning_patch').stop()
+        if error:result['error']=str(error)
+        result['ok']=not error
+        if report_path:Path(report_path).write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
+        window.close()
+    def tick():
+        try:
+            if time.monotonic()-started>20:raise TimeoutError('Feedback smoke exceeded 20 seconds')
+            stage=state['stage']
+            if stage==0:
+                for key,value in {'ip':'192.0.2.10','gateway':'192.0.2.1','mask':'255.255.255.0','dns':'2001:db8::53','switch':'demo-switch','port':'Gi1/0/1','vlan':'100','mac':'02:00:00:00:00:10'}.items():window.network_fields[key].setText(value)
+                window.note('Synthetic feedback regression')
+                window.port_panel.manual();window.port_panel.connected=('demo-switch','Gi1/0/1',300)
+                window.port_panel.failure((window.port_panel.connected,'Нет доступа к Graphene. Откройте порт в браузере и проверьте VPN / авторизацию.','access'))
+                export(deny=True);state['stage']=1
+            elif stage==1 and window.export_action.isEnabled():
+                assert target.read_text(encoding='utf-8')=='old report'
+                assert 'другую папку' in state['warning'].call_args.args[2]
+                result['checks']['read_only_preserves_report_and_session']=bool(window.sid)
+                state.pop('deny_patch').stop();state.pop('warning_patch').stop();export();state['stage']=2
+            elif stage==2 and window.export_action.isEnabled():
+                text=target.read_text(encoding='utf-8');assert window.sid in text and 'Synthetic feedback regression' in text
+                result['checks']['relative_dialog_writes_user_folder']=True
+                result['checks']['last_successful_folder_remembered']=window.property(text_export.DIRECTORY_PROPERTY)==str(out)
+                class Clipboard:
+                    text=''
+                    def setText(self,text):self.text=text
+                clipboard=Clipboard()
+                with patch.object(desktop.QApplication,'clipboard',return_value=clipboard):window.network_fields['dns'].copy_value()
+                assert clipboard.text=='2001:db8::53';result['checks']['full_field_copy']=True
+                with patch.object(QFileDialog,'getSaveFileName',return_value=('Stream.txt','Текст')):window.stream_panel.save_report()
+                state['stage']=3
+            elif stage==3 and not window.stream_panel.report_pending:
+                assert (out/'Stream.txt').is_file();result['checks']['stream_relative_dialog_export']=True
+                # Keep this synthetic source error visible while exercising a
+                # retry; no request to a real switch or Graphene is made.
+                with patch.object(desktop.graphene_port,'client_session'),patch.object(desktop.PortPanel,'age'),patch('port_widgets.PortFetch.start'):
+                    window.port_panel.refresh()
+                assert 'Нет доступа' in window.port_panel.status.text();result['checks']['graphene_retry_keeps_error']=True
+                window.resize(900,640);state['stage']=4
+            elif stage in (4,5):
+                size='900x640' if stage==4 else '1100x760'
+                path=folder/('feedback-'+size+'.png');assert window.grab().save(str(path))
+                result['screenshots'].append(str(path));result['checks'][size]=[window.width(),window.height()]
+                if stage==4:window.resize(1100,760);state['stage']=5
+                else:done()
+        except Exception as error:done(error)
+    timer.timeout.connect(tick);timer.start()

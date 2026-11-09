@@ -13,6 +13,15 @@ import graphene_port as source
 
 COLORS={'rx':'#7acb73','tx':'#f4cd35','rx_packets':'#7acb73','tx_packets':'#f4cd35','rx_errs':'#ef5263','tx_errs':'#ef8ba6','rx_drop':'#f58239','tx_drop':'#f4b753','flap':'#dce6f4'}
 LABELS={'rx':'RX','tx':'TX','rx_packets':'RX','tx_packets':'TX','rx_errs':'RX err','tx_errs':'TX err','rx_drop':'RX drop','tx_drop':'TX drop','flap':'flap'}
+ERROR_STATES={
+    'access':('Нет доступа к Graphene','Проверьте доступ в браузере (↗).'),
+    'timeout':('Graphene не отвечает','Проверьте сеть / VPN.'),
+    'network':('Нет связи с Graphene','Проверьте сеть / VPN.'),
+    'host':('Коммутатор не найден','Проверьте имя источника.'),
+    'port':('Порт не найден','Проверьте имя порта.'),
+    'tls':('Ошибка сертификата','Проверьте корпоративную сеть.'),
+    'http':('Graphene недоступен','Повторите запрос позже.'),
+    'source':('Нет свежих данных','Подробности — в подсказке.')}
 
 def number(value):
     if value is None:return '—'
@@ -29,15 +38,16 @@ class PortFetch(QThread):
         try:
             canonical=self.resolved or source.resolve(*self.key[:2],session=self.client)
             data=source.fetch(*canonical,self.key[2],session=self.client,previous=self.previous);data['requested']=self.key;self.ready.emit(data)
-        except source.SourceError as e:self.failed.emit((self.key,str(e)))
-        except Exception as e:error_log.error('Чтение Graphene',e);self.failed.emit((self.key,'Не удалось прочитать данные Graphene'))
+        except source.SourceError as e:self.failed.emit((self.key,str(e),e.code))
+        except Exception as e:error_log.error('Чтение Graphene',e);self.failed.emit((self.key,'Не удалось прочитать данные Graphene','source'))
 
 class PortPlot(CachedPlot):
     hovered=Signal(object)
+    BASE_TIP='RX — вход в коммутатор, TX — выход из коммутатора. Пропуски не равны нулю. Шаг определяется источником Graphene.'
     def __init__(self,title,keys):
         super().__init__();self.title=title;self.keys=keys;self.data=None;self.cursor=None;self.message="Укажите коммутатор и порт"
         self.setMinimumHeight(100);self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding);self.setMouseTracking(True)
-        self.setToolTip('RX — вход в коммутатор, TX — выход из коммутатора. Пропуски не равны нулю. Шаг определяется источником Graphene.')
+        self.setToolTip(self.BASE_TIP)
     @property
     def data(self):return self._data
     @data.setter
@@ -53,7 +63,8 @@ class PortPlot(CachedPlot):
         labels=[axis_label(maximum*(i/(lines-1))/factor,65,measure) for i in range(lines)]
         flapmax=max((v for _,v in series.get('flap',[]) if v is not None),default=1);flapmax=max(1,flapmax)
         flaplabel=axis_label(flapmax,55,measure)
-        info=dict(factor=factor,label=label,maximum=maximum,labels=labels,
+        has_data=any(v is not None for name in self.keys for _,v in series.get(name,[]))
+        info=dict(factor=factor,label=label,maximum=maximum,labels=labels,has_data=has_data,
                   left=max(42,max(map(measure,labels))+6),
                   right=max(34,measure(flaplabel)+8) if 'flap' in self.keys else 13,
                   flapmax=flapmax,flaplabel=flaplabel)
@@ -65,8 +76,8 @@ class PortPlot(CachedPlot):
     def draw_chart(self,p):
         p.setRenderHint(QPainter.RenderHint.Antialiasing);p.fillRect(self.rect(),QColor('#141d2b'));p.setPen(QColor('#263449'));p.drawRect(self.rect().adjusted(0,0,-1,-1))
         p.setPen(QColor('#dce6f4'));p.drawText(8,15,self.title);r=self.plot_rect()
-        if not self.data:
-            p.setPen(QColor('#91a2bb'));p.drawText(r,Qt.AlignmentFlag.AlignCenter|Qt.TextFlag.TextWordWrap,self.message);return
+        if not self.data or not self.chart_info()['has_data']:
+            p.setPen(QColor('#91a2bb'));p.drawText(r,Qt.AlignmentFlag.AlignCenter|Qt.TextFlag.TextWordWrap,self.message if not self.data else 'Нет данных за выбранный период');return
         begin=self.data['begin'];end=self.data['end'];series=self.data['series'];step=self.data.get('step')
         info=self.chart_info();maximum=info['maximum']
         x=lambda ts:r.left()+(ts-begin)/max(1,end-begin)*r.width()
@@ -185,9 +196,8 @@ class PortPanel(QWidget):
         if not self.auto:return
         host=neighbor.get('switch');port=neighbor.get('port')
         if not host or not port:
-            if self.connected:
-                self.lldp_missing=True;self.timer.stop();self.age()
-                if not self.snapshot:self.set_status('Нет LLDP · ждём подключения; источник сохранён')
+            self.lldp_missing=True;self.timer.stop();self.age()
+            if not self.snapshot:self.message('Нет LLDP · ждём подключения'+('; источник сохранён' if self.connected else ''))
             return
         try:source.validate_target(host,port)
         except source.SourceError:return
@@ -234,7 +244,12 @@ class PortPanel(QWidget):
         if self.closing or self.lldp_missing or not self.connected or (self.worker and self.worker.isRunning()):return
         if self.worker:self.worker.deleteLater()
         if not hasattr(self,'client'):self.client=source.client_session()
-        self.message('Читаем Graphene…');self.worker=PortFetch(self.connected,self.resolved,self.client,self.snapshot);self.worker.ready.connect(self.receive);self.worker.failed.connect(self.failure);self.worker.finished.connect(self.finished);self.worker.start()
+        # Keep the previous error visible during retries. A five-second timer
+        # must not continually replace an actionable error with a loading label.
+        if not self.failed:
+            if self.snapshot:self.age()
+            else:self.message('Читаем Graphene…')
+        self.worker=PortFetch(self.connected,self.resolved,self.client,self.snapshot);self.worker.ready.connect(self.receive);self.worker.failed.connect(self.failure);self.worker.finished.connect(self.finished);self.worker.start()
     def finished(self):
         if self.worker and self.worker.key!=self.connected:QTimer.singleShot(0,self.refresh)
     def receive(self,data):
@@ -243,13 +258,22 @@ class PortPanel(QWidget):
         for field,value in ((self.host,data['host']),(self.port,data['port'])):
             field.setToolTip(value)
             if field.text()!=value:field.setText(value);field.setCursorPosition(0)
-        for plot in self.plots:plot.data=data;plot.update()
+        for plot in self.plots:plot.data=data;plot.setToolTip(plot.BASE_TIP);plot.update()
         self.received.emit(data)
         self.age()
     def failure(self,error):
-        key,message=error
+        key,message,*codes=error
         if self.closing or self.lldp_missing or key!=self.connected:return
-        self.failed=True;self.message('Нет свежих данных · '+message)
+        self.failed=True
+        if codes:
+            title,action=ERROR_STATES.get(codes[0],ERROR_STATES['source'])
+            self.set_status(title,True)
+            details=message
+            if self.snapshot and self.snapshot.get('latest') is not None:
+                details+='\nПоследние данные: '+format_timestamp(self.snapshot['latest'])
+            self.status.setToolTip(details)
+            for plot in self.plots:plot.message=title+'\n'+action;plot.setToolTip(details);plot.update()
+        else:self.message('Нет свежих данных · '+message)
         # Retain old history with its original timestamps; no false zeros or current samples.
     def age(self):
         if not self.snapshot or (self.failed and not self.lldp_missing):return

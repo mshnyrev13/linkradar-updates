@@ -219,7 +219,12 @@ class IPCIntegration(unittest.TestCase):
 class Distribution(unittest.TestCase):
     def test_fixed_certifi_bundle_excludes_compromised_emsign_root(self):
         import certifi
-        context=ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT);context.load_verify_locations(certifi.where())
+        # Inspect this bundle alone. Host Python distributions may preload
+        # additional CA policy entries in ssl.SSLContext.__new__.
+        import _ssl
+        context=_ssl._SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        self.assertEqual(context.cert_store_stats()['x509'],0)
+        context.load_verify_locations(certifi.where())
         self.assertFalse(any('emSign ECC Root CA - G3' in str(c['subject']) for c in context.get_ca_certs()))
 
     def test_speed_test_does_not_follow_untrusted_redirects(self):

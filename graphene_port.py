@@ -14,7 +14,17 @@ BASE='https://graphene.yandex-team.ru'
 SENSORS=('rx','tx','rx_packets','tx_packets','rx_errs','tx_errs','rx_drop','tx_drop','flap')
 PERIODS=((30,'30 сек'),(60,'1 мин'),(300,'5 мин'),(1800,'30 мин'),(3600,'1 час'),(10800,'3 часа'),(21600,'6 часов'),(43200,'12 часов'),(86400,'24 часа'))
 
-class SourceError(Exception):pass
+class SourceError(Exception):
+    def __init__(self,message,code='source'):
+        super().__init__(message);self.code=code
+
+def check_status(response,catalog=False):
+    status=response.status_code
+    if status==200:return
+    response.close()
+    if status in (401,403) or 300<=status<400:
+        raise SourceError('Нет доступа к Graphene (HTTP '+str(status)+'). Откройте этот порт в Graphene и проверьте корпоративную сеть / VPN и авторизацию.','access')
+    raise SourceError(('Каталог портов Graphene' if catalog else 'Graphene')+' недоступен (HTTP '+str(status)+'). Повторите запрос позже.','http')
 
 def read_json(response,limit=20*1024*1024,seconds=20):
     """Bound decompressed bytes during the transfer, including catalog replies."""
@@ -24,6 +34,8 @@ def read_json(response,limit=20*1024*1024,seconds=20):
             for chunk in response.iter_content(64*1024):
                 if len(payload)+len(chunk)>limit:raise SourceError('Ответ Graphene слишком большой')
                 payload.extend(chunk)
+        if payload.lstrip().startswith(b'<'):
+            raise SourceError('Graphene вернул веб-страницу вместо данных. Откройте Graphene в браузере и проверьте доступ / авторизацию.','access')
         try:return json.loads(payload)
         except (ValueError,RecursionError):raise SourceError('Graphene вернул некорректный JSON') from None
     finally:response.close()
@@ -109,15 +121,18 @@ def resolve(host,port,session=None):
     host,port=validate_target(host,port);own=session is None;client=client_session() if own else session
     def suggest(fields,key):
         try:
-            r=client.post(BASE+'/graphene/back/suggest',json={'fields':fields,'suggest':key},timeout=(5,15),verify=True,allow_redirects=False,stream=True)
-            if r.status_code!=200:
-                r.close();raise SourceError('Нет доступа к каталогу портов Graphene (HTTP '+str(r.status_code)+')')
-            data=read_json(r,2*1024*1024)
+            # Also bound headers and a slowly streaming peer; requests' read
+            # timeout alone is reset by each received chunk.
+            with bound_http.Deadline(20):
+                r=client.post(BASE+'/graphene/back/suggest',json={'fields':fields,'suggest':key},timeout=(5,15),verify=True,allow_redirects=False,stream=True)
+                check_status(r,catalog=True);data=read_json(r,2*1024*1024)
             if not data.get('ok'):raise SourceError('Каталог Graphene не ответил')
             values=data.get('result',{}).get('suggest')
             if not isinstance(values,list):raise SourceError('Неожиданный формат каталога Graphene')
             return [v for v in values if isinstance(v,str)]
-        except (requests.RequestException,TimeoutError):raise SourceError('Нет связи с каталогом Graphene') from None
+        except requests.exceptions.SSLError:raise SourceError('Не удалось проверить сертификат Graphene. Проверьте корпоративное подключение и сертификаты системы.','tls') from None
+        except (requests.Timeout,TimeoutError):raise SourceError('Graphene не ответил вовремя. Проверьте корпоративную сеть / VPN и повторите запрос.','timeout') from None
+        except requests.RequestException:raise SourceError('Нет связи с каталогом Graphene. Проверьте корпоративную сеть / VPN.','network') from None
         except ValueError:raise SourceError('Graphene требует доступ / авторизацию') from None
     try:
         candidates=[host]
@@ -127,11 +142,11 @@ def resolve(host,port,session=None):
             matches=[v for v in suggest({'graph':'bytes','host':name},'host') if v.lower()==name.lower()]
             if len(matches)>1:raise SourceError('Неоднозначное имя коммутатора в Graphene')
             if matches:canonical=matches[0];break
-        if not canonical:raise SourceError('Коммутатор не найден в Graphene: проверьте имя')
+        if not canonical:raise SourceError('Коммутатор не найден в Graphene: проверьте точное имя.','host')
         ports=suggest({'graph':'bytes','host':canonical},'iface')
         matches=[v for v in ports if v.lower()==port.lower()]
         if not matches:matches=[v for v in ports if port_identity(v)==port_identity(port)]
-        if len(matches)!=1:raise SourceError('Порт не найден в Graphene' if not matches else 'Неоднозначное имя порта в Graphene')
+        if len(matches)!=1:raise SourceError('Порт не найден в Graphene: проверьте точное имя.' if not matches else 'Неоднозначное имя порта в Graphene','port')
         return canonical,matches[0]
     finally:
         if own:client.close()
@@ -148,13 +163,12 @@ def fetch(host,port,period,end=None,session=None,previous=None):
            'time_interval':f'time >= {int(begin*1000)}ms and time <= {int(end*1000)}ms'}
     own=session is None;client=client_session() if own else session
     try:
-        response=client.get(BASE+'/graphene/back/query',params={'db':'graphene','q':json.dumps(query)},timeout=(5,15),verify=True,allow_redirects=False,stream=True)
-        if response.status_code in (401,403) or 300<=response.status_code<400:
-            response.close();raise SourceError('Graphene требует доступ из корпоративной сети / авторизацию')
-        if response.status_code!=200:
-            response.close();raise SourceError('Graphene недоступен (HTTP '+str(response.status_code)+')')
-        data=read_json(response)
-    except (requests.RequestException,TimeoutError):raise SourceError('Нет связи с Graphene: проверьте корпоративную сеть / VPN') from None
+        with bound_http.Deadline(20):
+            response=client.get(BASE+'/graphene/back/query',params={'db':'graphene','q':json.dumps(query)},timeout=(5,15),verify=True,allow_redirects=False,stream=True)
+            check_status(response);data=read_json(response)
+    except requests.exceptions.SSLError:raise SourceError('Не удалось проверить сертификат Graphene. Проверьте корпоративное подключение и сертификаты системы.','tls') from None
+    except (requests.Timeout,TimeoutError):raise SourceError('Graphene не ответил вовремя. Проверьте корпоративную сеть / VPN и повторите запрос.','timeout') from None
+    except requests.RequestException:raise SourceError('Нет связи с Graphene: проверьте корпоративную сеть / VPN','network') from None
     except ValueError:raise SourceError('Graphene вернул страницу вместо данных') from None
     finally:
         if own:client.close()
