@@ -96,20 +96,20 @@ class FeedbackRegressions(unittest.TestCase):
             self.seed(window);target=Path(folder)/'Отчёт сети.txt'
             with patch.object(desktop.QFileDialog,'getSaveFileName',return_value=(str(target),'')):
                 window.export_session();self.wait_export(window)
-            self.assertTrue(target.exists());self.assertIn('192.0.2.1',target.read_text())
+            self.assertTrue(target.exists());self.assertIn('192.0.2.1',target.read_text(encoding='utf-8'))
             self.assertEqual(window.property(text_export.DIRECTORY_PROPERTY),folder)
 
     def test_read_only_export_keeps_session_and_allows_retry(self):
         with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),managed_window(desktop.Window(Path(folder),service_folder=False)) as window:
-            self.seed(window);target=Path(folder)/'keep.txt';target.write_text('previous report')
+            self.seed(window);target=Path(folder)/'keep.txt';target.write_text('previous report',encoding='utf-8')
             with patch.object(desktop.QFileDialog,'getSaveFileName',return_value=(str(target),'')),patch.object(export_transfer.tempfile,'NamedTemporaryFile',side_effect=OSError(errno.EROFS,'Read-only filesystem')),patch.object(desktop.QMessageBox,'warning') as warning:
                 window.export_session();self.wait_export(window)
-            self.assertEqual(target.read_text(),'previous report');self.assertEqual(window.sid,'fixture')
+            self.assertEqual(target.read_text(encoding='utf-8'),'previous report');self.assertEqual(window.sid,'fixture')
             self.assertIsNone(window.property(text_export.DIRECTORY_PROPERTY))
             self.assertIn('другую папку',warning.call_args.args[2])
             with patch.object(desktop.QFileDialog,'getSaveFileName',return_value=(str(target),'')):
                 window.export_session();self.wait_export(window)
-            self.assertIn('192.0.2.1',target.read_text())
+            self.assertIn('192.0.2.1',target.read_text(encoding='utf-8'))
 
     def test_stream_save_uses_same_absolute_location_and_remembers_success(self):
         panel=stream_widgets.StreamPanel();panel.timer.stop()
@@ -118,7 +118,7 @@ class FeedbackRegressions(unittest.TestCase):
                 panel.setProperty(text_export.DIRECTORY_PROPERTY,folder)
                 with patch.object(stream_widgets.QFileDialog,'getSaveFileName',return_value=('Stream.txt','')):
                     panel.save_report();flush_report(panel)
-                self.assertEqual((Path(folder)/'Stream.txt').read_text(),'Synthetic stream report')
+                self.assertEqual((Path(folder)/'Stream.txt').read_text(encoding='utf-8'),'Synthetic stream report')
                 self.assertEqual(panel.property(text_export.DIRECTORY_PROPERTY),folder)
         finally:panel.shutdown();panel.deleteLater();self.app.processEvents()
 
@@ -226,9 +226,9 @@ class GrapheneAccessTests(unittest.TestCase):
 
     def test_failed_replace_leaves_old_report_and_no_temporary_file(self):
         with tempfile.TemporaryDirectory() as folder:
-            target=Path(folder)/'report.txt';target.write_text('old')
+            target=Path(folder)/'report.txt';target.write_text('old',encoding='utf-8')
             with patch.object(export_transfer.os,'replace',side_effect=PermissionError(errno.EACCES,'denied')):
                 with self.assertRaises(PermissionError):export_transfer.atomic_write(target,lambda output:output.write(b'new'))
-            self.assertEqual(target.read_text(),'old');self.assertEqual(list(Path(folder).iterdir()),[target])
+            self.assertEqual(target.read_text(encoding='utf-8'),'old');self.assertEqual(list(Path(folder).iterdir()),[target])
 
 if __name__=='__main__':unittest.main()
