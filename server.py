@@ -32,7 +32,7 @@ from power_guard import PowerGuard
 from packet_tools import PacketTools
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "2.10.11"
+VERSION = "2.10.12"
 RETENTION_SECONDS = 12 * 3600
 # A measurement thread that ends early is restarted by the session timer at most this often.
 WATCHDOG_SECONDS = 5

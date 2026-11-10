@@ -20,7 +20,7 @@ PERIODS=[(60,'1 мин'),(300,'5 мин'),(900,'15 мин'),(1800,'30 мин'),(
 STATES={'live':('В ЭФИРЕ','#22c55e'),'reconnecting':('ПЕРЕПОДКЛЮЧЕНИЕ','#ef6275'),'connected':('подключено','#60a5fa'),'found':('обнаружен','#91a2bb'),
         'off':('остановлен','#91a2bb'),'lost':('пропал','#f59e0b')}
 LEVEL_COLORS=('#dce6f4','#f4cd35','#ef6275')
-COLUMNS=['Источник','Протокол','Назначение','Состояние','В эфире','Битрейт','FPS','Потеряно','Потери/с','Congest.','RTT','Ретр., %','Примечание']
+COLUMNS=['Источник','Протокол','Назначение','Состояние','В эфире','Битрейт','FPS','Потеряно','Потери/с','Буфер','RTT','Повторы, %','Примечание']
 COLUMN_TIPS=['','','Сервер приёма без ключа или адрес соединения','','Длительность эфира','Битрейт, кбит/с','Кадров в секунду',
              'Потеряно кадров всего (доля, %)','Среднее число потерянных кадров в секунду между двумя свежими опросами; после паузы нужен новый замер','Congestion OBS 0–1: заполненность буфера отправки',
              'RTT TCP до сервера приёма, мс','Повторно отправленные TCP-сегменты, %','']
@@ -30,6 +30,27 @@ VMIX_WIDTHS=[160,80,60,70,60,60,260,170]
 BUTTON_STYLE='QPushButton{background:#172437;border:1px solid #3b82f6;border-radius:6px;padding:4px 12px;color:#dce6f4;} QPushButton:hover{background:#203f67;border-color:#93c5fd;} QPushButton:pressed{background:#2563eb;} QPushButton:disabled{background:#172130;border-color:#3c4c62;color:#9cabbd;}'
 
 def fmt(value,digits=0):return engine.fmt(value,digits)
+
+
+def missing_metric_message(stream,status,keys,remote_vmix=False):
+    """Explain missing source data, without turning absence into zero or loss."""
+    if not stream:return 'Выберите поток в таблице'
+    if stream.get('state') in ('off','lost'):return 'Нет свежих данных: поток остановлен или источник недоступен'
+    key=stream['key']
+    if key.startswith('vmix:'):
+        if 'dropped_rate' in keys:
+            if remote_vmix:return 'Потери кадров доступны через Statistics на компьютере с vMix'
+            if status.get('vmix_stats',{}).get('state')!='ok':return 'Откройте Statistics в vMix, затем выберите его строку в таблице'
+            return 'Выберите строку vMix Statistics с потерями кадров; API трансляции их не сообщает'
+        if 'bitrate' in keys or 'rtt' in keys:
+            if remote_vmix:return 'TCP-счётчики доступны на компьютере с vMix; удалённый API их не сообщает'
+            if status.get('tcp',{}).get('state')=='error':return 'Не удалось прочитать TCP-счётчики. Подробности — в статусе TCP'
+            return 'Нет TCP-счётчиков. Попробуйте запуск LinkRadar от администратора; для скорости нужны два замера'
+    if key.startswith('tcp:'):
+        if 'dropped_rate' in keys:return 'TCP не сообщает потери видеокадров. Выберите поток OBS или строку vMix Statistics'
+        return 'Нет TCP-счётчиков. Попробуйте запуск от администратора; для скорости нужны два замера'
+    if key.startswith('obs:') and status.get('obs',{}).get('state')!='ok':return 'Подключите OBS WebSocket: Инструменты → Настройки сервера WebSocket'
+    return 'Источник не передал этот показатель за выбранный период'
 
 
 def network_context(reader):
@@ -77,7 +98,7 @@ class SeriesPlot(CachedPlot):
         x=lambda ts:r.left()+(ts-self.start)/max(1,self.end-self.start)*r.width()
         samples=self.sampled()
         if not self.points or not any(p_[1].get(s['key']) is not None for p_ in samples for s in self.series):
-            p.setPen(QColor('#91a2bb'));p.drawText(r,Qt.AlignmentFlag.AlignCenter|Qt.TextFlag.TextWordWrap,self.message if not self.points else 'Нет данных этого показателя');return
+            p.setPen(QColor('#91a2bb'));p.drawText(r,Qt.AlignmentFlag.AlignCenter|Qt.TextFlag.TextWordWrap,self.message);return
         left=next(s for s in self.series if s.get('axis','left')=='left');maximum=self.scale(left);lines=5 if self.height()>=170 else 3
         for i in range(lines):
             yy=r.bottom()-r.height()*i/(lines-1)
@@ -196,7 +217,7 @@ class StreamPanel(QWidget):
         self.table.cellClicked.connect(self.select_row);self.table.currentCellChanged.connect(self.select_row)
         self.chart_title=QLabel('Поток не выбран');self.plots=[SeriesPlot('Битрейт, кбит/с',[{'key':'bitrate','label':'битрейт','color':'#7acb73','min_scale':100}]),
             SeriesPlot('Потери кадров / с',[{'key':'dropped_rate','label':'потеряно','color':'#ef6275','style':'bars','min_scale':5}]),
-            SeriesPlot('RTT, мс · congestion',[{'key':'rtt','label':'RTT','color':'#42b4ff','min_scale':50},{'key':'congestion','label':'congestion 0–1','color':'#f4cd35','axis':'right','max':1}])]
+            SeriesPlot('RTT, мс · буфер',[{'key':'rtt','label':'RTT','color':'#42b4ff','min_scale':50},{'key':'congestion','label':'буфер 0–1','color':'#f4cd35','axis':'right','max':1}])]
         charts=QWidget();charts_layout=QVBoxLayout(charts);charts_layout.setContentsMargins(0,0,0,0);charts_layout.setSpacing(4);charts_layout.addWidget(self.chart_title)
         row=QHBoxLayout();row.setSpacing(5)
         for plot in self.plots:row.addWidget(plot,1)
@@ -255,9 +276,15 @@ class StreamPanel(QWidget):
         return [s for s in data['streams'] if not (s['key'].startswith('tcp:') and s['state']=='lost' and now-s.get('last_seen',now)>60)]
     def render(self,data):
         names={'obs':'OBS','vmix_api':'vMix API','vmix_stats':'vMix Statistics','tcp':'TCP','ndi':'NDI'};parts=[]
+        has_vmix=any(s['key'].startswith('vmix:') and s['state'] in ('live','connected','reconnecting') for s in data['streams'])
+        has_obs=any(s['key'].startswith('obs:') for s in data['streams'])
+        self.sources.setToolTip('\n'.join(names[key]+': '+status['text'] for key,status in data['status'].items()))
         for key,status in data['status'].items():
             color={'ok':'#22c55e','error':'#ef6275'}.get(status['state'],'#91a2bb')
-            parts.append(f"<span style='color:{color}'>●</span> <b>{names[key]}</b>: {escape(status['text'])}")
+            text=status['text']
+            if key=='obs' and status['state']!='ok' and has_vmix and not has_obs:
+                color='#91a2bb';text='не подключён · нужен только для OBS'
+            parts.append(f"<span style='color:{color}'>●</span> <b>{names[key]}</b>: {escape(text)}")
         obs=data.get('obs') or {}
         if obs:parts.append(f"<b>OBS</b>: {fmt(obs.get('active_fps'),1)} fps · CPU {fmt(obs.get('cpu'),1)}% · рендер {fmt(obs.get('render_ms'),1)} мс · пропущено рендером {obs.get('render_skipped')} · кодировщиком {obs.get('encoder_skipped')}")
         self.sources.setText(' &nbsp; '.join(parts))
@@ -286,7 +313,13 @@ class StreamPanel(QWidget):
         stream=next((s for s in streams if s['key']==self.selected),None)
         self.chart_title.setText((stream['label']+' · '+STATES.get(stream['state'],(stream['state'],''))[0]) if stream else 'Выберите поток в таблице')
         points=data['history'].get(self.selected,[]) if self.selected else []
-        for plot in self.plots:plot.set_data(points,data['now'],self.period.currentData())
+        try:remote_vmix=not engine.sources.is_loopback(engine.sources.urllib.parse.urlsplit(self.vmix_url.text()).hostname)
+        except ValueError:remote_vmix=True
+        for plot in self.plots:
+            plot.message=missing_metric_message(stream,data['status'],{s['key'] for s in plot.series},remote_vmix)
+            plot.set_data(points,data['now'],self.period.currentData())
+            has_values=any(point[1].get(series['key']) is not None for point in plot.points for series in plot.series)
+            plot.setToolTip('Наведите на график для значений в выбранный момент' if has_values else plot.message)
         rows=data.get('vmix_rows') or []
         self.vmix_table.setRowCount(len(rows))
         for row,r in enumerate(rows):

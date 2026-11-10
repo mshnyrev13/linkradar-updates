@@ -54,7 +54,7 @@ def main():
     documentation = app / 'Contents/Resources/Documentation'
     documentation.mkdir(parents=True, exist_ok=True)
     build_manifest.save(root,documentation/'BUILD-MANIFEST.json',VERSION,platform='macOS-arm64',minimum_macos='15.0',signing='ad-hoc',runtime_ca_policy_sha256=build_manifest.digest(ca_policy) if ca_policy.is_file() else None)
-    for source, name in [('RELEASE-NOTES-2.10.11.md', 'RELEASE-NOTES-2.10.11.md'), ('RELEASE-NOTES-2.10.10.md', 'RELEASE-NOTES-2.10.10.md'), ('README-macOS.md', 'README.md'),
+    for source, name in [('RELEASE-NOTES-2.10.12.md', 'RELEASE-NOTES-2.10.12.md'), ('RELEASE-NOTES-2.10.11.md', 'RELEASE-NOTES-2.10.11.md'), ('RELEASE-NOTES-2.10.10.md', 'RELEASE-NOTES-2.10.10.md'), ('README-macOS.md', 'README.md'),
                          ('STANDALONE.md', 'STANDALONE.md'), ('STREAM.md', 'STREAM.md'),
                          ('SECURITY-AUDIT.md','SECURITY-AUDIT.md'),
                          ('SPEED-AUDIT.md','SPEED-AUDIT.md'),

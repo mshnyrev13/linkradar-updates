@@ -8,6 +8,7 @@ from measurement_metrics import iter_jitter,database_cadence
 
 HEADER=('LinkRadar — полная сессия\n'
         'RTT/jitter EWMA (alpha=1/16): миллисекунды; mean_delta: средняя абсолютная ΔRTT. ts: Unix seconds.\n'
+        'Windows ICMP: RTT с шагом 1 мс; 0 означает менее 1 мс. Нулевой jitter не исключает колебаний менее 1 мс. Числа ниже — исходные значения API.\n'
         'Graphene RX/TX: бит/с; packets/errors/drops: пакетов/с. Пропуски не заполняются.\n\n')
 
 def record(store,sid,kind,key,data,ts=None):

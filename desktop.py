@@ -36,6 +36,7 @@ from traffic_widgets import TrafficPanel,capture_icon
 from stream_widgets import StreamPanel
 from about_dialog import AboutDialog
 from app_identity import NAME
+from measurement_display import rtt as rtt_text,precision_note
 
 ROOT = Path(__file__).resolve().parent
 # Graphene and the lower diagnostics row share vertical space. Route and latency
@@ -98,9 +99,9 @@ class ExportWorker(QThread):
 class Discovery(QThread):
     ready=Signal(object)
     def __init__(self):
-        super().__init__();self.stop=threading.Event();self.selected=None
+        super().__init__();self.stop=threading.Event();self.restart=threading.Event();self.selected=None
     def run(self):
-        try:network_info.discover(self.stop,lambda:self.selected,self.ready.emit)
+        try:network_info.discover(self.stop,lambda:self.selected,self.ready.emit,self.restart)
         except Exception as exc:error_log.error('Сбор сетевых сведений остановлен',exc)
 
 class SpeedWorker(QThread):
@@ -172,7 +173,7 @@ class RouteSummary(QWidget):
         value_font=painter.font();font=painter.font();font.setPointSizeF(max(8,font.pointSizeF()-1));painter.setFont(font)
         painter.drawText(label,Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter,'Round Trip (ms)')
         painter.setFont(value_font)
-        for col,value in [(1,str(self.stats.get('count','—'))),(4,fmt(self.stats.get('avg'))),(5,fmt(self.stats.get('min'))),(6,fmt(self.current))]:
+        for col,value in [(1,str(self.stats.get('count','—'))),(4,rtt_text(self.stats.get('avg'))),(5,rtt_text(self.stats.get('min'))),(6,rtt_text(self.current))]:
             if not self.table.isColumnHidden(col):painter.drawText(cell(col),Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter,value)
 
 class RangeDelegate(QStyledItemDelegate):
@@ -264,8 +265,8 @@ class Graph(CachedPlot):
         if not self.points:return
         xx=min(self.width()-18,max(48,event.position().x()));ts=self.start+(xx-48)/max(1,self.width()-66)*(self.end-self.start)
         q=nearest_point(self.points,ts,key=lambda point:point['ts']);self.cursor=xx;self.update()
-        status=fmt(q.get('latency'),2)+' мс' if q['status']=='ok' else {'error':'локальная ошибка проверки','unreachable':'цель недоступна (ICMP)','refused':'соединение отклонено'}.get(q['status'],'нет ответа')
-        text=format_timestamp(q['ts'])+' · RTT '+status+' · Jitter '+fmt(q.get('jitter'),2)+' мс'
+        status=rtt_text(q.get('latency'),2)+' мс' if q['status']=='ok' else {'error':'локальная ошибка проверки','unreachable':'цель недоступна (ICMP)','refused':'соединение отклонено'}.get(q['status'],'нет ответа')
+        text=format_timestamp(q['ts'])+' · RTT '+status+' · Jitter '+fmt(q.get('jitter'),2)+' мс'+('\n'+precision_note() if precision_note() else '')
         self.setToolTip(text);self.hover.emit(text)
     def leaveEvent(self,event):self.cursor=None;self.update()
     def wheelEvent(self,event):self.zoom.emit(1 if event.angleDelta().y()<0 else -1);event.accept()
@@ -389,11 +390,12 @@ class Window(QMainWindow):
         later=QToolButton();later.setText('Позже');later.clicked.connect(self.update_banner.hide);update_row.addWidget(later)
         self.update_banner.hide();layout.addWidget(self.update_banner)
         self.identification_title=QLabel('Сетевая идентификация');self.identification_title.setFixedHeight(16);self.identification_title.setStyleSheet('font-size:11px;font-weight:600;')
-        self.identification_title.setToolTip('Определяет сетевое подключение компьютера через LLDP и показывает его IP- и MAC-адреса.');layout.addWidget(self.identification_title)
+        self.identification_title.setToolTip('Определяет коммутатор и порт по LLDP/CDP и показывает IP- и MAC-адреса компьютера.');layout.addWidget(self.identification_title)
         network_header=QHBoxLayout();network_header.addWidget(QLabel('Адаптер'))
         self.nic=QComboBox();self.nic.setStyleSheet('QComboBox{padding:3px 6px;}');self.nic.setMinimumWidth(140);self.nic.setMaximumWidth(260);self.nic.addItem('Автоматически',None);self.nic.currentIndexChanged.connect(self.select_interface);network_header.addWidget(self.nic)
         self.nic.setToolTip('Выбирает адаптер для ping, маршрута, локального захвата пакетов, сетевых сведений и LLDP. Автоматически — маршрут ОС. Тест скорости использует выбранный адаптер; DNS — резолвер ОС.')
         self.lldp_status=QLabel('Собираем сетевые данные…');self.lldp_status.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred);network_header.addWidget(self.lldp_status,1)
+        self.discovery_refresh=QToolButton();self.discovery_refresh.setText('↻');self.discovery_refresh.setAccessibleName('Обновить сведения о подключении');self.discovery_refresh.setToolTip('Заново открыть приём LLDP/CDP на выбранном адаптере. Ожидаем следующее объявление коммутатора; мгновенный ответ не гарантирован.');self.discovery_refresh.clicked.connect(self.restart_discovery);network_header.addWidget(self.discovery_refresh)
         self.copy_button=QToolButton();self.copy_button.setText('Copy');self.copy_button.setToolTip('Скопировать Switch, Port, VLAN, Graphene, IP, MASK, GATEWAY и MAC');self.copy_button.clicked.connect(self.copy_network);network_header.addWidget(self.copy_button)
         self.tools_button=QToolButton();self.tools_button.setText('⚙');self.tools_button.setAccessibleName('Журналы и экспорт');self.tools_button.setToolTip('Журналы, экспорт TXT и справка');self.tools_button.setFixedSize(28,26)
         self.tools_button.setStyleSheet('QToolButton{font-size:18px;color:#dce6f4;padding:0;} QToolButton::menu-indicator{image:none;}')
@@ -430,7 +432,7 @@ class Window(QMainWindow):
         self.traffic_splitter.setToolTip('Перетащите разделитель под захватом пакетов вниз, чтобы увеличить высоту таблицы')
         self.traffic_panel.expansionChanged.connect(self.size_capture);self.traffic_splitter.splitterMoved.connect(self.remember_capture_height)
         layout=QVBoxLayout(monitor_panel);layout.setContentsMargins(0,0,0,0);layout.setSpacing(4)
-        self.diagnostics_title=QLabel('Диагностики сети');self.diagnostics_title.setFixedHeight(16);self.diagnostics_title.setStyleSheet('font-size:11px;font-weight:600;')
+        self.diagnostics_title=QLabel('Диагностика сети');self.diagnostics_title.setFixedHeight(16);self.diagnostics_title.setStyleSheet('font-size:11px;font-weight:600;')
         self.diagnostics_title.setToolTip('Регулярно проверяет маршрут до сервера и показывает задержки и потери пакетов на графике.');layout.addWidget(self.diagnostics_title)
         diagnostics=QWidget();columns=QHBoxLayout(diagnostics);columns.setContentsMargins(0,0,0,0);columns.setSpacing(8)
         sidebar=QWidget();sidebar.setFixedWidth(SIDEBAR_WIDTH);controls=QVBoxLayout(sidebar);controls.setContentsMargins(0,0,0,0);controls.setSpacing(3);columns.addWidget(sidebar)
@@ -451,13 +453,14 @@ class Window(QMainWindow):
             caption=QLabel('Средняя' if row==2 else title);caption.setToolTip(title);caption.setStyleSheet('font-size:10px;color:#91a2bb;');metrics.addWidget(caption,row,0)
             label=QLabel('—');label.setAccessibleName(title);label.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter);label.setFixedHeight(18);label.setStyleSheet('font-size:11px;font-weight:600;');metrics.addWidget(label,row,1);self.cards.append(label)
         controls.addWidget(self.metrics)
+        self.precision_label=QLabel('RTT: шаг 1 мс');self.precision_label.setStyleSheet('font-size:10px;color:#91a2bb;');self.precision_label.setToolTip(precision_note())
         controls.addStretch(1)
         speed_row=QHBoxLayout();speed_row.setSpacing(4);speed_row.addWidget(self.speed_button);speed_row.addWidget(self.speed_readout);controls.addLayout(speed_row)
         sidebar.setMinimumHeight(controls.minimumSize().height())
         self.panes=QSplitter(Qt.Orientation.Horizontal);self.panes.setChildrenCollapsible(False);self.panes.setHandleWidth(6)
         self.panes.setToolTip('Перетащите разделитель между маршрутом и графиками, чтобы изменить ширину колонок')
         route_panel=QWidget();route_panel.setMinimumWidth(440);route_layout=QVBoxLayout(route_panel);route_layout.setContentsMargins(0,0,0,0);route_layout.setSpacing(4)
-        route_title=QLabel('Маршрут');route_title.setToolTip('● средняя RTT · голубая метка — текущая задержка · серая полоса — Min–Max');route_layout.addWidget(route_title)
+        route_title=QLabel('Маршрут');route_title.setToolTip('● средняя RTT · голубая метка — текущая задержка · серая полоса — Min–Max');route_header=QHBoxLayout();route_header.addWidget(route_title,1);route_header.addWidget(self.precision_label);self.precision_label.setVisible(bool(precision_note()));route_layout.addLayout(route_header)
         self.table=RouteTable(0,9);self.table.setHorizontalHeader(RouteHeader(self.table));self.table.setHorizontalHeaderLabels(['Hop','Count','IP','Name','Avg','Min','Cur','PL%','Latency, мс'])
         self.table.verticalHeader().setMinimumSectionSize(18);self.table.verticalHeader().setDefaultSectionSize(18)
         self.table.setMinimumHeight(70);self.table.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding);self.table.setStyleSheet('QTableWidget{font-size:11px;} QHeaderView::section{padding:3px;}')
@@ -503,6 +506,7 @@ class Window(QMainWindow):
         self.live.setToolTip('История ограничена 12 часами. Закрытие приложения останавливает сессию и очищает накопленные данные.'+(' Работает системная служба.' if self.service else ' Мониторинг удерживает компьютер от автоматического сна.'))
         if '--no-discovery' not in sys.argv:
             self.discovery=Discovery();self.discovery.selected=self.selected_interface;self.discovery.ready.connect(self.show_network);self.discovery.start()
+        self.discovery_refresh.setEnabled(self.discovery is not None)
         self.restore_preferences()
         self.layout_timer=QTimer(self);self.layout_timer.setSingleShot(True);self.layout_timer.timeout.connect(self.balance_blocks)
         self.log_action.toggled.connect(self.queue_balance)
@@ -678,7 +682,7 @@ class Window(QMainWindow):
             value.setText(text or '—');value.setToolTip(text if key!='vlan' else 'PVID объявлен коммутатором через LLDP; не является списком VLAN транка')
             if key=='mac':value.setToolTip(value.text()+'\n'+local.get('mac_source','MAC выбранного интерфейса'))
         self.lldp_status.setText((local.get('name','')+' · ' if local else '')+data['lldp_status'])
-        self.lldp_status.setToolTip('LLDP слушается автоматически; обновление конфигурации каждые 10 секунд. Switch/port/VLAN появятся только из реального объявления.')
+        self.lldp_status.setToolTip('LLDP/CDP слушаются автоматически; конфигурация обновляется каждые 10 секунд. Порт появится после объявления коммутатора. ↻ рядом с адаптером заново открывает приём; ↻ в Graphene перечитывает только графики.')
         self.lldp_status.setTextFormat(Qt.TextFormat.PlainText)
     def measure_speed(self):
         if self.speed_worker and self.speed_worker.isRunning():
@@ -763,6 +767,11 @@ class Window(QMainWindow):
         self.update_control();self.refresh()
         self.record('network','initial',self.network_snapshot)
         if self.port_panel.snapshot:self.record_port(self.port_panel.snapshot)
+    def restart_discovery(self):
+        if self.discovery and self.discovery.isRunning():
+            self.discovery.restart.set()
+            self.lldp_status.setText('Заново открываем приём LLDP/CDP…')
+
     def update_control(self):
         same=False
         try:
@@ -938,21 +947,21 @@ class Window(QMainWindow):
         self.table.horizontalHeader().scale=scale;self.table.horizontalHeader().viewport().update()
         self.table.setRowCount(len(hops))
         for row,h in enumerate(hops):
-            stats=h['stats'];last=h['last'];values=[str(h['hop']),str(stats['count']),h['ip'] or '—',h.get('name') or '—',fmt(stats['avg']),fmt(stats['min']),fmt(last.get('latency')),fmt(stats['loss']), '']
+            stats=h['stats'];last=h['last'];values=[str(h['hop']),str(stats['count']),h['ip'] or '—',h.get('name') or '—',rtt_text(stats['avg']),rtt_text(stats['min']),rtt_text(last.get('latency')),fmt(stats['loss']), '']
             for col,value in enumerate(values):
                 item=QTableWidgetItem(value)
                 if col==2:item.setToolTip((h.get('name') or '')+'\n'+str(h['ip'] or '—')+'\nПроб: '+str(stats['count']))
                 if col==8:
                     item.setData(Qt.ItemDataRole.UserRole,(stats['min'],stats['avg'],stats['max'],last.get('latency'),scale))
-                    item.setToolTip('Hop '+str(h['hop'])+' · средняя '+fmt(stats['avg'])+' мс · текущая '+fmt(last.get('latency'))+' мс\nMin '+fmt(stats['min'])+' мс · Max '+fmt(stats['max'])+' мс'+('\nMax выходит за шкалу (стрелка справа)' if (stats['max'] or 0)>scale else '')+'\nСредний интервал проб узла: '+fmt(h.get('interval'),2)+' с\nRTT до узла, не задержка отдельного участка. Ответы ICMP могут иметь низкий приоритет.')
+                    item.setToolTip('Hop '+str(h['hop'])+' · средняя '+rtt_text(stats['avg'])+' мс · текущая '+rtt_text(last.get('latency'))+' мс\nMin '+rtt_text(stats['min'])+' мс · Max '+rtt_text(stats['max'])+' мс'+('\nMax выходит за шкалу (стрелка справа)' if (stats['max'] or 0)>scale else '')+'\nСредний интервал проб узла: '+fmt(h.get('interval'),2)+' с\nRTT до узла, не задержка отдельного участка. Ответы ICMP могут иметь низкий приоритет.'+('\n'+precision_note() if precision_note() else ''))
                 self.table.setItem(row,col,item)
             if self.selected_node==h['node']:self.table.selectRow(row)
         hop=next((h for h in hops if h['node']==self.selected_node),None)
         points=hop['graph'] if hop else ping['graph'];stats=hop['stats'] if hop else s
         if hop and snapshot.get('compact') and snapshot.get('selected_node')!=self.selected_node:points=[]
         self.chart_title.setText((('Узел '+str(hop['hop'])) if hop else ping['host'])+' · задержка')
-        self.cards[2].setText(fmt(s['avg'])+' мс');self.cards[3].setText(fmt(s['max'])+' мс')
-        for card in self.cards:card.setToolTip('Конечный сервер '+ping['host']+' · выбранный период; ICMP не измеряет jitter видеопотока')
+        self.cards[2].setText(rtt_text(s['avg'])+' мс');self.cards[3].setText(rtt_text(s['max'])+' мс')
+        for card in self.cards:card.setToolTip('Конечный сервер '+ping['host']+' · выбранный период; ICMP не измеряет jitter видеопотока'+('\n'+precision_note() if precision_note() else ''))
         end=snapshot['session']['analysis_end']
         for graph in [self.jitter,self.graph]:graph.set_data(points,end,self.period.currentData())
         if update_events:self.update_logs(snapshot['events'])
@@ -973,9 +982,10 @@ class Window(QMainWindow):
             lines=list(base);ping=next((t for t in snapshot.get('targets',[]) if t.get('mode')=='icmp'),None)
             if ping:
                 s=ping['window_stats'];jitter=(ping.get('window_last') or {}).get('jitter')
-                lines.append(f"ICMP до {ping['host']} за {label}: средн. {fmt(s['avg'])} мс · макс. {fmt(s['max'])} мс · без ответа {fmt(s['loss'],2)}% · jitter {fmt(jitter)} мс")
+                lines.append(f"ICMP до {ping['host']} за {label}: средн. {rtt_text(s['avg'])} мс · макс. {rtt_text(s['max'])} мс · без ответа {fmt(s['loss'],2)}% · jitter {fmt(jitter)} мс")
+                if precision_note():lines.append(precision_note())
                 hops=[h for h in ping.get('hops',[]) if h.get('ip')]
-                if hops:lines.append('Маршрут: '+' → '.join(f"{h['ip']} ({fmt(h['stats']['avg'])} мс)" for h in hops[:20]))
+                if hops:lines.append('Маршрут: '+' → '.join(f"{h['ip']} ({rtt_text(h['stats']['avg'])} мс)" for h in hops[:20]))
             else:lines.append('ICMP-мониторинг не запущен')
             if data_error:lines.append('ВНИМАНИЕ: часть данных сессии не удалось записать.')
             if any(ch.isdigit() for ch in speed):lines.append('Тест скорости (HTTP до CDN Яндекса): '+speed)

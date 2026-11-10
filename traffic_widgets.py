@@ -73,13 +73,13 @@ class TrafficPanel(QWidget):
         super().__init__();self.engine=TrafficCapture();self.available=None;self.interface_name='';self.reason='Дождитесь сетевого адаптера';self.closing=False;self.selected=None;self.expanded=False
         self.setMinimumHeight(44)
         layout=QVBoxLayout(self);layout.setContentsMargins(0,0,0,0);layout.setSpacing(3)
-        header=QHBoxLayout();header.setSpacing(5);self.title=QLabel('Анализа сетевого трафика');self.title.setTextFormat(Qt.TextFormat.PlainText);self.title.setStyleSheet('font-size:11px;font-weight:600;')
+        header=QHBoxLayout();header.setSpacing(5);self.title=QLabel('Анализ сетевого трафика');self.title.setTextFormat(Qt.TextFormat.PlainText);self.title.setStyleSheet('font-size:11px;font-weight:600;')
         self.title.setToolTip('Перехватывает пакеты и показывает, кто с кем обменивается данными, по каким протоколам и с какими ошибками.');header.addWidget(self.title,1)
         self.title.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred);self.title.setMinimumWidth(160)
         self.status=QLabel('Дождитесь сетевого адаптера · запуск вручную');self.status.setStyleSheet('color:#91a2bb;font-size:10px;');self.status.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred);header.addWidget(self.status,1)
         self.play_icon=capture_icon('play');self.pause_icon=capture_icon('pause')
         self.play=QToolButton();self.play.setIcon(self.play_icon);self.play.setAccessibleName('Запустить захват пакетов');self.play.setToolTip('Запустить захват на адаптере, выбранном вверху');self.play.clicked.connect(self.start);header.addWidget(self.play)
-        self.stop=QToolButton();self.stop.setIcon(capture_icon('stop'));self.stop.setAccessibleName('Остановить захват пакетов');self.stop.setToolTip('Остановить захват; последние пакеты удаляются по истечении 2 минут');self.stop.clicked.connect(self.stop_capture);header.addWidget(self.stop);layout.addLayout(header)
+        self.stop=QToolButton();self.stop.setIcon(capture_icon('stop'));self.stop.setAccessibleName('Остановить захват пакетов');self.stop.setToolTip('Завершить захват и закрыть адаптер. ▶ начнёт новый захват. Уже показанные пакеты остаются до истечения 2 минут; это не очистка истории.');self.stop.clicked.connect(self.stop_capture);header.addWidget(self.stop);layout.addLayout(header)
         for button,background in ((self.play,'#2563eb'),(self.stop,'#263449')):
             button.setFixedSize(32,26);button.setIconSize(QSize(16,16))
             button.setStyleSheet('QToolButton{background:'+background+';border:1px solid #344459;border-radius:5px;padding:0;} QToolButton:hover{border-color:#93c5fd;} QToolButton:disabled{background:#141d2b;border-color:#263449;}')
@@ -144,7 +144,7 @@ class TrafficPanel(QWidget):
         source=snapshot['source'] if snapshot['source'] and (rows or busy) else self.available
         name=self.interface_name if source and self.available and source[0]==self.available[0] else source[0] if source else ''
         adapter='Адаптер: '+str(name)+' ('+str(source[0])+')' if source else 'Адаптер выбран вверху; LLDP для захвата не требуется'
-        self.play.setToolTip(self.play.accessibleName()+' · история не старше 2 минут\n'+adapter)
+        self.play.setToolTip(self.play.accessibleName()+' · история не старше 2 минут\nПауза прекращает сбор; ▶ продолжает ту же сессию с сохранением недавних пакетов. После ■ кнопка ▶ начинает новую сессию. Старые пакеты удаляются и во время паузы.\n'+adapter)
         text={'starting':'Открываем адаптер…','running':'● Захват','paused':'ПАУЗА · история до 2 минут','stopping':'Завершаем…','stopped':'Остановлено · история до 2 минут' if self.available else self.reason,'error':snapshot['error']}.get(state,self.reason)
         if rows and state not in ('starting','running','paused','stopping'):
             text+=' · последние пакеты'

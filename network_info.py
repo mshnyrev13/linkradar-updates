@@ -1,4 +1,4 @@
-"""Local interface configuration and passive LLDP. No Wireshark dependency."""
+"""Local interface configuration and passive LLDP/CDP. No Wireshark dependency."""
 import ctypes as C
 import ipaddress
 import json
@@ -172,6 +172,40 @@ def parse_lldp(frame):
     return result
 
 
+def parse_cdp(frame):
+    """Read CDP v1/v2 from Ethernet LLC/SNAP; never treat padding as TLVs."""
+    if len(frame)<14 or frame[:6]!=bytes.fromhex('01000ccccccc'):return None
+    length=int.from_bytes(frame[12:14],'big');offset=14
+    while length in (0x8100,0x88a8,0x9100):
+        if len(frame)<offset+4:return None
+        length=int.from_bytes(frame[offset+2:offset+4],'big');offset+=4
+    if not 12<=length<=1500 or len(frame)<offset+length:return None
+    payload=frame[offset:offset+length]
+    if payload[:8]!=bytes.fromhex('aaaa0300000c2000') or payload[8] not in (1,2):return None
+    result={'switch':None,'port':None,'vlan':None,'ttl':payload[9],
+            'chassis':None,'port_description':None,'vlan_names':[],'protocol':'CDP'}
+    offset=12;seen=set()
+    while offset<len(payload):
+        if len(payload)-offset<4:return None
+        kind=int.from_bytes(payload[offset:offset+2],'big');size=int.from_bytes(payload[offset+2:offset+4],'big')
+        if size<4 or offset+size>len(payload):return None
+        value=payload[offset+4:offset+size];offset+=size
+        if kind in (1,3,10):
+            if kind in seen:return None
+            seen.add(kind)
+        if kind in (1,3):
+            text=value.decode('utf-8',errors='replace').strip('\x00')
+            if not text:return None
+            result['switch' if kind==1 else 'port']=text
+        elif kind==10:
+            if len(value)!=2:return None
+            vlan=int.from_bytes(value,'big')
+            if 1<=vlan<=4094:result['vlan']=vlan
+    if not result['switch'] or not result['port']:return None
+    result['chassis']=result['switch']
+    return result
+
+
 class TimeVal(C.Structure):
     _fields_=[('tv_sec',C.c_long),('tv_usec',C.c_long)]
 class PacketHeader(C.Structure):
@@ -244,19 +278,33 @@ class PcapCapture:
 
 class LldpCapture(PcapCapture):
     def __init__(self,interface):
-        # Only LLDP payloads, including VLAN/QinQ, enter the discovery reader.
-        filt=b'ether[12:2] = 0x88cc or ((ether[12:2] = 0x8100 or ether[12:2] = 0x88a8) and ether[16:2] = 0x88cc) or ((ether[12:2] = 0x8100 or ether[12:2] = 0x88a8) and (ether[16:2] = 0x8100 or ether[16:2] = 0x88a8) and ether[20:2] = 0x88cc)'
-        super().__init__(interface,2048,filt)
+        # Promiscuous mode admits discovery multicast on USB drivers which do
+        # not subscribe to it themselves. BPF still excludes ordinary traffic.
+        filt=b'ether dst 01:00:0c:cc:cc:cc or ether[12:2] = 0x88cc or ((ether[12:2] = 0x8100 or ether[12:2] = 0x88a8) and ether[16:2] = 0x88cc) or ((ether[12:2] = 0x8100 or ether[12:2] = 0x88a8) and (ether[16:2] = 0x8100 or ether[16:2] = 0x88a8) and ether[20:2] = 0x88cc)'
+        super().__init__(interface,2048,filt,promiscuous=True)
     def poll(self):
-        packet=self.read_packet()
-        return parse_lldp(packet['raw']) if packet else None
+        # A non-CDP Cisco multicast packet must not hide an announcement later
+        # in the same batch (nor allow an unbounded read under packet flood).
+        for _ in range(64):
+            packet=self.read_packet()
+            if not packet:return None
+            # Npcap/libpcap may also return outbound or reflected frames.
+            # A local LLDP agent is not the switch attached to this adapter.
+            if packet['raw'][6:12] in getattr(self,'local_macs',()):continue
+            neighbor=parse_lldp(packet['raw']) or parse_cdp(packet['raw'])
+            if neighbor:return neighbor
+        return None
 
 
-def discover(stop, selected, publish):
-    capture=None; interface_id=None; rows=[]; current={}; neighbor=None; expires=0; refresh_at=0;retry_at=0;since=0
+def discover(stop, selected, publish, restart=None):
+    capture=None; interface_id=None; rows=[]; current={}; neighbor=None; neighbors={}; refresh_at=0;retry_at=0;since=0;opened_at=0
     try:
         while not stop.is_set():
             now=time.monotonic()
+            if restart is not None and restart.is_set():
+                restart.clear()
+                if capture:capture.close();capture=None
+                interface_id=None;neighbor=None;neighbors.clear();retry_at=0;refresh_at=0;since=now
             if now>=refresh_at:
                 refresh_at=now+10
                 try:rows=local_interfaces();error_log.resolved('network-config')
@@ -264,36 +312,56 @@ def discover(stop, selected, publish):
                     error_log.error('Не удалось прочитать сетевую конфигурацию',exc,key='network-config')
                     rows=[]
                     if capture:capture.close();capture=None
-                    interface_id=None;neighbor=None
+                    interface_id=None;neighbor=None;neighbors.clear()
                     publish({'interfaces':[], 'local':{}, 'neighbor':None,'lldp_status':'Сетевая конфигурация недоступна'})
                     stop.wait(.2);continue
             requested=selected()
             current=next((r for r in rows if r['id']==requested),None) if requested else next((r for r in rows if r.get('default')),rows[0] if rows else None)
-            new_id=current['id'] if current else None
+            new_id=(current['id'],current['capture'],current.get('mac')) if current else None
             if new_id!=interface_id:
                 if capture:capture.close();capture=None
-                interface_id=new_id;neighbor=None;retry_at=0;since=now;expires=0
+                interface_id=new_id;neighbor=None;neighbors.clear();retry_at=0;since=now
             if current and not capture and now>=retry_at:
                 retry_at=now+30
-                try:capture=LldpCapture(current['capture']);status='Ожидаем LLDP от коммутатора…';since=now
+                try:capture=LldpCapture(current['capture']);status='Ожидаем LLDP/CDP от коммутатора…';opened_at=now
                 except OSError as exc:status=str(exc)
                 except AttributeError:status='LLDP недоступен'
                 except Exception as exc:status='LLDP недоступен';error_log.error('LLDP-захват не открылся',exc,key='lldp-open')
             if capture:
                 try:
+                    capture.local_macs=local_mac_bytes(rows)
                     for _ in range(64):
                         packet=capture.poll()
                         if packet:
-                            if packet['ttl']==0:neighbor=None;expires=0
-                            else:neighbor=packet;expires=now+packet['ttl']
+                            protocol=packet.get('protocol','LLDP')
+                            if packet['ttl']==0:neighbors.pop(protocol,None)
+                            else:neighbors[protocol]=(packet,now+packet['ttl'])
                         else:break
-                    if neighbor and now>=expires:neighbor=None
-                    status='LLDP получен' if neighbor else 'LLDP не получен: проверьте LLDP на коммутаторе и кабель' if now-since>=65 else 'Ожидаем LLDP от коммутатора…'
+                    neighbors={key:value for key,value in neighbors.items() if now<value[1]}
+                    # Prefer LLDP while valid: differing CDP port aliases must
+                    # not alternate the displayed source on every announcement.
+                    best=neighbors.get('LLDP') or neighbors.get('CDP')
+                    neighbor=best[0] if best else None
+                    status=(neighbor.get('protocol','LLDP')+' получен') if neighbor else 'LLDP/CDP пока не получен · ожидаем объявление коммутатора' if now-since>=65 else 'Ожидаем LLDP/CDP от коммутатора…'
+                    if not neighbor and now-opened_at>=65:
+                        # Some USB drivers keep a silent handle after a brief
+                        # cable flap between configuration refreshes.
+                        capture.close();capture=None;retry_at=now
                 except OSError as exc:
                     error_log.error('LLDP-захват прерван',exc,key='lldp-read')
-                    capture.close();capture=None;neighbor=None;status='LLDP-захват прерван';retry_at=now+5
+                    capture.close();capture=None;neighbor=None;neighbors.clear();status='LLDP/CDP-захват прерван';retry_at=now+5
             if not current:status='Нет активного сетевого интерфейса'
             publish({'interfaces':rows,'local':current or {},'neighbor':neighbor,'lldp_status':status})
             stop.wait(.5)
     finally:
         if capture:capture.close()
+
+
+def local_mac_bytes(rows):
+    result=set()
+    for row in rows:
+        text=re.sub(r'[:.\-]','',str(row.get('mac') or ''))
+        if re.fullmatch(r'[0-9a-fA-F]{12}',text):
+            value=bytes.fromhex(text)
+            if value not in (bytes(6),b'\xff'*6):result.add(value)
+    return result

@@ -326,7 +326,7 @@ class StreamMonitor:
         # HTTPS/other ports of OBS/vMix are API/update traffic unless the app is on air.
         connections=[c for c in connections if c['protocol'] in ('RTMP','NDI','RTSP') or c['app'] not in ('OBS','vMix') or c['app'] in live]
         with_stats=[c for c in connections if c.get('estats')]
-        self.status['tcp']['text']=f'{len(connections)} потоковых соединений энкодеров'+('' if with_stats or not connections else ' · байты/RTT: нужен запуск от администратора')
+        self.status['tcp']['text']=f'{len(connections)} потоковых соединений энкодеров'+('' if with_stats or not connections else ' · счётчики недоступны; попробуйте запуск от администратора')
         seen=set()
         for conn in connections:
             key=f"tcp:{conn['app']}:{conn['remote']}:{conn['remote_port']}:{conn['local_port']}";seen.add(key);estats=conn.get('estats') or {}
@@ -339,7 +339,7 @@ class StreamMonitor:
             retrans=self.counter_delta(key,'retrans',current['retrans'])
             stream.update(bitrate=rate(previous,current,'bytes',seconds),rtt=estats.get('rtt'),bytes=current['bytes'],retrans_total=current['retrans'],
                           retrans_pct=100*retrans/sent if sent and retrans is not None else None,
-                          note='' if estats else 'байты/RTT: нужен администратор')
+                          note='' if estats else 'TCP-счётчики недоступны; попробуйте запуск от администратора')
             if level('retrans_pct',stream['retrans_pct'])==2:self.event(key,'warn',f"{stream['label']}: ретрансмиты {fmt(stream['retrans_pct'],1)}%")
         return seen
     def update_ndi(self,now,found):
