@@ -7,7 +7,7 @@ from types import SimpleNamespace
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QPointF
 from PySide6.QtWidgets import QApplication
-import desktop,port_widgets,stream_widgets
+from linkradar.ui import desktop, port_widgets, stream_widgets
 
 def event(x,y=50):return SimpleNamespace(position=lambda:QPointF(x,y))
 
@@ -36,7 +36,7 @@ class VisualQuality(unittest.TestCase):
   self.assertTrue(ys);self.assertGreater(max(ys)-min(ys),50);chart.close();chart.deleteLater()
  def test_graphene_failure_marks_retained_history_and_recovery_clears_warning(self):
   from unittest.mock import patch
-  import graphene_port
+  from linkradar.network import graphene_port
   panel=port_widgets.PortPanel();panel.connected=('qa-switch','Gi1/0/1',300)
   data={'host':'qa-switch','port':'Gi1/0/1','period':300,'begin':1000,'end':1300,'latest':1300,'step':5,'series':{key:[(1300,1)] for key in graphene_port.SENSORS}}
   try:

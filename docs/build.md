@@ -1,6 +1,18 @@
 # Запуск из исходников и сборка
 
-`desktop.py` запускает настольный интерфейс Qt/PySide6, `server.py` содержит движок измерений и номер версии. Прежний веб-интерфейс находится в `static/`. [Документация веб-версии](archive/guides/README-WEB.md)
+Приложение запускается командой `python -m linkradar`. Номер версии задаётся в `linkradar/__init__.py`.
+
+| Папка | Назначение |
+| --- | --- |
+| `linkradar/ui/` | Окна и виджеты Qt |
+| `linkradar/core/` | Хранение, статистика и отчёты |
+| `linkradar/network/` | Сетевые пробы, захват и тест скорости |
+| `linkradar/stream/` | OBS, vMix и NDI |
+| `linkradar/system/` | Интеграция с ОС и фоновый движок |
+| `packaging/` | Скрипты сборки и компоненты для Windows и macOS |
+| `tests/`, `docs/` | Проверки и документация |
+
+Прежний веб-интерфейс использует `static/`. Для запуска из исходников выполните `python -m linkradar.core.server`.
 
 ## Запуск
 
@@ -11,7 +23,7 @@ macOS:
 ```sh
 python3.13 -m venv .venv
 .venv/bin/python -m pip install -r requirements-desktop.txt
-.venv/bin/python desktop.py
+.venv/bin/python -m linkradar
 ```
 
 Windows PowerShell:
@@ -19,12 +31,12 @@ Windows PowerShell:
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-desktop.txt
-.\.venv\Scripts\python.exe desktop.py
+.\.venv\Scripts\python.exe -m linkradar
 ```
 
 ## Windows x64
 
-В Actions задание **Build and verify Windows installer** загружает проверенный по SHA-256 Windows runtime с python.org, ставит закреплённые зависимости из PyPI, компилирует лаунчер из C и собирает Inno Setup. Проверка включает установку, запуск нативного окна с измерением loopback, повторную установку и удаление во временной папке. Задание загружает `Setup.exe` как отдельный артефакт. SHA-256 выводится в журнале сборки.
+В Actions задание **Build and verify Windows installer** загружает проверенный по SHA-256 Windows runtime с python.org, ставит закреплённые зависимости из PyPI, компилирует лаунчер из C и собирает Inno Setup. Проверка включает установку, запуск нативного окна с измерением loopback, повторную установку и удаление во временной папке. Задание загружает `Setup.exe` как отдельный артефакт. SHA-256 выводится в журнале сборки. Комплект содержит приложение, библиотеки и утилиты фонового движка. Инструкции доступны на GitHub.
 
 Для локальной сборки откройте x64 Native Tools Command Prompt for Visual Studio с MSVC и Windows SDK. Установите Python 3.13 и Inno Setup 6.4 или новее. В PowerShell из этого окружения выполните:
 

@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock,patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import mac_capture
+from linkradar.system import mac_capture
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -54,7 +54,7 @@ class CaptureSetup(unittest.TestCase):
   with patch.object(Path,'glob',return_value=[device]):self.assertFalse(mac_capture.access_ready())
  @unittest.skipUnless(sys.platform=='darwin','macOS application startup with POSIX lock')
  def test_running_background_engine_does_not_skip_capture_preflight(self):
-  import desktop
+  from linkradar.ui import desktop
   events=[]
   with tempfile.TemporaryDirectory() as folder,patch.object(sys,'argv',['app','--data-dir',folder]),patch.object(desktop,'QApplication') as app,patch.object(desktop,'QLabel'),patch.object(desktop.error_log,'setup'),patch.object(desktop,'qInstallMessageHandler'),patch.object(desktop,'Window') as window,patch.object(desktop.mac_capture,'prepare',side_effect=lambda:(events.append('capture') or ('ready',''))),patch.object(desktop.mac_background,'prepare',side_effect=lambda f:(events.append('engine') or ('ready',''))):
    desktop.main();self.assertEqual(events,['capture','engine']);window.assert_called_once_with(Path(folder),require_service=True,service_folder=Path(folder))
@@ -96,7 +96,7 @@ elif name=='launchctl':
  if args[0]=='bootstrap':state.touch()
  if args[0]=='bootout':state.unlink(missing_ok=True)
 '''.replace('PYTHON',sys.executable).replace('ROOT',repr(str(self.root)))
-  self.script=(ROOT/'packaging/bpf-access-root.sh').read_text(encoding='utf-8')
+  self.script=(ROOT/'packaging/macos/bpf-access-root.sh').read_text(encoding='utf-8')
   commands=['/usr/bin/id','/usr/sbin/sysctl','/usr/bin/stat','/usr/bin/dscl','/usr/sbin/dseditgroup','/usr/bin/chgrp','/bin/chmod','/usr/bin/install','/bin/launchctl']
   for command in commands:
    target=self.bin/Path(command).name;target.write_text(fake);target.chmod(0o755);self.script=self.script.replace(command,str(target))

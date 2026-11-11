@@ -5,7 +5,8 @@ import sys,struct,tempfile,threading,time,unittest,gc
 from pathlib import Path
 from unittest.mock import patch,Mock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import traffic_capture as capture,traffic_widgets as ui,desktop
+from linkradar.network import traffic_capture as capture
+from linkradar.ui import traffic_widgets as ui, desktop
 from PySide6.QtCore import QCoreApplication,QEvent,QSize
 from PySide6.QtGui import QIcon
 

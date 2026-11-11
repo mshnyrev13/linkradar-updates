@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import server
+from linkradar.core import server
 
 class EventLifecycleTests(unittest.TestCase):
     def test_restart_clears_events_preserves_measurements(self):
@@ -25,7 +25,7 @@ class EventLifecycleTests(unittest.TestCase):
             store.event('old','','info','old event')
             monitor=server.Monitor(store)
             config=server.validate_config({'duration_minutes':1,'targets':[{'host':'127.0.0.1'}]})
-            with patch('threading.Thread.start'),patch('power_guard.PowerGuard.start'):
+            with patch('threading.Thread.start'),patch('linkradar.system.power_guard.PowerGuard.start'):
                 sid=monitor.start(config)
             events=store.rows('SELECT * FROM events')
             self.assertTrue(events)

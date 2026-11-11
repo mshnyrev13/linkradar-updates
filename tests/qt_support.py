@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QApplication
 
 def production_application(test_case):
     """Use the same Fusion/theme bootstrap as desktop.main, restore after the class."""
-    import desktop
+    from linkradar.ui import desktop
     app=QApplication.instance() or QApplication([])
     old_style,old_sheet=app.style().objectName(),app.styleSheet()
     def restore():

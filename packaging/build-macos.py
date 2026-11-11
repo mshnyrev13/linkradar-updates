@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import ssl
-import build_manifest
+from payload import check_clean_payload, remove_documentation
 
 
 def main():
@@ -19,7 +19,7 @@ def main():
         parser.error('Build this package on macOS.')
     root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(root))
-    from server import VERSION
+    from linkradar import VERSION
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     # Some CPython distributions use an on-disk CA deny list in ssl.py.
@@ -27,23 +27,34 @@ def main():
     # SSLContext dependent on a file outside the standalone bundle.
     ca_policy = Path(ssl.__file__).with_name('codex-rejected-cas.pem')
     runtime_data = ['--add-data', f'{ca_policy}:.'] if ca_policy.is_file() else []
+    macos = root / 'packaging/macos'
+    branding = root / 'linkradar/branding'
+    runtime_data += ['--add-data', f'{branding / "network-watch-logo.png"}:linkradar/branding']
+    for name in (
+        'install-background-mac.command',
+        'remove-background-mac.command',
+        'configure-background-mac.sh',
+        'install-capture-access-mac.command',
+        'remove-capture-access-mac.command',
+        'bpf-access-root.sh',
+    ):
+        runtime_data += ['--add-data', f'{macos / name}:packaging']
     subprocess.run([
         sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean',
         '--windowed', '--onedir', '--name', 'LinkRadar',
         '--distpath', str(output / 'dist'), '--workpath', str(output / 'work'),
         '--specpath', str(output), '--target-architecture', 'arm64',
         '--osx-bundle-identifier', 'tech.vcs.network-watch',
-        '--icon', str(root / 'branding/NetworkWatch.icns'),
-        '--add-data', f'{root / "branding"}:branding',
-        '--add-data', f'{root / "packaging"}:packaging',
+        '--icon', str(branding / 'NetworkWatch.icns'),
+        '--paths', str(root),
         '--collect-data', 'certifi', '--copy-metadata', 'truststore',
         '--copy-metadata', 'PySide6-Essentials', '--copy-metadata', 'shiboken6',
-    ] + runtime_data + [str(root / 'desktop.py')], cwd=root, check=True)
+    ] + runtime_data + [str(root / 'linkradar/__main__.py')], cwd=root, check=True)
     app = output / 'dist/LinkRadar.app'
     # UDP readiness through Network.framework triggers/waits for the ordinary
     # Local Network decision before native ICMP starts. No root or extra grants.
     subprocess.run(['/usr/bin/xcrun', 'swiftc', '-O', '-target', 'arm64-apple-macos15.0',
-                    str(root / 'packaging/mac-network-access.swift'),
+                    str(macos / 'mac-network-access.swift'),
                     '-o', str(app / 'Contents/MacOS/LinkRadarNetworkAccess')], check=True)
     plist = app / 'Contents/Info.plist'
     info = plistlib.loads(plist.read_bytes())
@@ -51,15 +62,8 @@ def main():
                 NSAppSleepDisabled=True, LSMinimumSystemVersion='15.0',
                 NSLocalNetworkUsageDescription='Диагностика сети, LLDP и ручной захват пакетов выбранного адаптера.')
     plist.write_bytes(plistlib.dumps(info))
-    documentation = app / 'Contents/Resources/Documentation'
-    documentation.mkdir(parents=True, exist_ok=True)
-    build_manifest.save(root,documentation/'BUILD-MANIFEST.json',VERSION,platform='macOS-arm64',minimum_macos='15.0',signing='ad-hoc',runtime_ca_policy_sha256=build_manifest.digest(ca_policy) if ca_policy.is_file() else None)
-    for source, name in (
-        ('docs/macos.md', 'README.md'),
-        ('docs/standalone.md', 'standalone.md'),
-        ('docs/stream.md', 'stream.md'),
-    ):
-        shutil.copy2(root / source, documentation / name)
+    remove_documentation(app)
+    check_clean_payload(app)
     subprocess.run(['/usr/bin/codesign', '--force', '--deep', '--sign', '-', str(app)], check=True)
     subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', str(app)], check=True)
     print(app)

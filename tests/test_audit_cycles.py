@@ -15,17 +15,21 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QCoreApplication,QEvent
 from PySide6.QtWidgets import QApplication
 from qt_support import close_window,flush_io
-import desktop,server,graphene_port,ui_tasks,stream_monitor,stream_widgets,session_export
+from linkradar.ui import desktop, ui_tasks, stream_widgets
+from linkradar.core import server, session_export
+from linkradar.network import graphene_port
+from linkradar.stream import stream_monitor
 from PySide6.QtTest import QTest
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QPersistentModelIndex
-import traffic_widgets,traffic_capture
-from log_widgets import suffix_overlap
+from linkradar.ui import traffic_widgets
+from linkradar.network import traffic_capture
+from linkradar.ui.log_widgets import suffix_overlap
 
 
 @contextmanager
 def window():
-    with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+    with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
         widget=desktop.Window(Path(folder));widget.timer.stop()
         try:yield widget
         finally:

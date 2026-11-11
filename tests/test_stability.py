@@ -6,14 +6,17 @@ import io,json,tempfile,time,threading,unittest,sys
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import server,measurement_metrics as mm,stream_monitor,desktop,session_export,export_transfer,graphene_port,dns_resolver
+from linkradar.core import server, measurement_metrics as mm, session_export, export_transfer
+from linkradar.stream import stream_monitor
+from linkradar.ui import desktop
+from linkradar.network import graphene_port, dns_resolver
 from PySide6.QtCore import QCoreApplication,QEvent
 
 class Correctness(unittest.TestCase):
  @classmethod
  def setUpClass(cls):cls.app=desktop.QApplication.instance() or desktop.QApplication([])
  def test_current_values_do_not_come_from_peak_bucket(self):
-  with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    w=desktop.Window(Path(folder));w.timer.stop();w.address.setText('192.0.2.1');w.toggle();sid=w.sid;tid=w.monitor.config['targets'][0]['id'];now=time.time()
    w.store.execute('UPDATE sessions SET started=? WHERE id=?',(now-451,sid))
    w.store.db.executemany('INSERT INTO samples VALUES (?,?,?,?,?,?,?)',((sid,tid,now-451+i*.5,'ok',200 if i==900 else 10,'192.0.2.1','') for i in range(902)));w.store.db.commit()
@@ -23,7 +26,7 @@ class Correctness(unittest.TestCase):
      self.assertEqual(w.route_summary.current,10);self.assertEqual(w.cards[0].text(),'23,0 мс')
    finally:close_window(w);w.store.db.close();w.deleteLater();QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
  def test_stale_probe_not_presented_as_live(self):
-  with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    w=desktop.Window(Path(folder));w.timer.stop();w.address.setText('192.0.2.1');w.toggle();sid=w.sid;tid=w.monitor.config['targets'][0]['id']
    try:
     w.store.execute('UPDATE sessions SET started=? WHERE id=?',(time.time()-120,sid));w.store.execute('INSERT INTO samples VALUES (?,?,?,?,?,?,?)',(sid,tid,time.time()-60,'ok',10,'192.0.2.1',''))
@@ -58,7 +61,7 @@ class Correctness(unittest.TestCase):
   self.assertEqual(answer['status'],'unreachable');self.assertIsNone(answer['latency'])
   self.assertEqual(server.metrics([answer])['loss'],100);self.assertEqual(server.metrics([answer])['errors'],0)
  def test_scoped_ipv6_route_recognizes_an_unscoped_echo_peer(self):
-  import route_engine
+  from linkradar.network import route_engine
   binding=dict(id='en7',index=7,source='fe80::2')
   with patch.object(server.interface_probes,'binding_for',return_value=binding),patch.object(server.interface_probes,'echo',return_value=dict(kind='echo',latency=2,ip='fe80::1')):
    route=route_engine.trace_cycle('fe80::1%en7',.5,20,interface='en7')
@@ -177,7 +180,7 @@ class EngineLifecycle(unittest.TestCase):
      self.assertEqual(m.ptr_names,{})
    finally:release.set();store.db.close()
  def test_route_follows_ping_ip_with_retention_and_cancels_when_it_changes(self):
-  with tempfile.TemporaryDirectory() as folder,patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  with tempfile.TemporaryDirectory() as folder,patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    store=server.Store(Path(folder)/'db',retention_seconds=server.RETENTION_SECONDS);m=server.Monitor(store)
    cfg=server.validate_config({'continuous':True,'interval':.5,'route_interval':.5,'timeout':.5,'targets':[{'host':'load-balanced.example'}]});target=cfg['targets'][0];sid='s';stop=threading.Event();seen=[]
    m.latest_samples[(sid,target['id'])]=dict(ts=time.time(),ip='192.0.2.10',status='ok',latency=10,detail='')
@@ -199,16 +202,16 @@ class EngineLifecycle(unittest.TestCase):
     self.assertEqual(len(store.rows('SELECT * FROM hop_samples')),10)
    finally:store.db.close()
  def test_idempotent_record_retries_a_lost_reply(self):
-  import background_engine
+  from linkradar.system import background_engine
   p=background_engine.Proxy('.',dict(active_id='s'))
   rows=[['s','speed','one',1,{'download':8}]]
   with patch.object(background_engine,'request',side_effect=[EOFError(),1]) as request,patch.object(background_engine.time,'sleep'):
    p.record(rows)
   self.assertEqual(request.call_count,2);self.assertEqual(request.call_args_list[0],request.call_args_list[1])
  def test_unanswered_authentication_does_not_block_other_clients(self):
-  import background_engine
+  from linkradar.system import background_engine
   from multiprocessing.connection import Client
-  with tempfile.TemporaryDirectory(prefix='lr-') as folder,patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  with tempfile.TemporaryDirectory(prefix='lr-') as folder,patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    stop=threading.Event();worker=threading.Thread(target=background_engine.run,args=(folder,stop));worker.start();stalled=None
    try:
     deadline=time.monotonic()+5;proxy=None
@@ -221,7 +224,7 @@ class EngineLifecycle(unittest.TestCase):
     stop.set();worker.join(6)
    self.assertFalse(worker.is_alive())
  def test_start_waits_for_concurrent_clear_instead_of_losing_new_session(self):
-  with tempfile.TemporaryDirectory() as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  with tempfile.TemporaryDirectory() as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    store=server.Store(Path(folder)/'db');m=server.Monitor(store);cfg={'continuous':True,'targets':[{'host':'192.0.2.1'}]};m.start(cfg)
    entered=threading.Event();release=threading.Event();done=threading.Event();original=store.clear;created=[]
    def clear():entered.set();release.wait(2);original()
@@ -234,7 +237,8 @@ class EngineLifecycle(unittest.TestCase):
    finally:m.clear();store.db.close()
  def test_long_profile_uses_short_owner_only_ipc_socket_path(self):
   if os.name=='nt':self.skipTest('Unix socket path')
-  import background_engine,stat
+  from linkradar.system import background_engine
+  import stat
   with tempfile.TemporaryDirectory() as folder:
    a,family=background_engine.address(Path(folder)/('x'*120));b,_=background_engine.address(Path(folder)/('y'*120))
    self.assertEqual(family,'AF_UNIX');self.assertLess(len(a.encode()),100);self.assertNotEqual(a,b)
@@ -253,7 +257,7 @@ class AsyncSources(unittest.TestCase):
   with self.assertRaises(graphene_port.SourceError):graphene_port.read_json(response,limit=50)
   self.assertTrue(response.closed);self.assertEqual(response.read,2)
  def test_graphene_manual_selection_can_return_to_latest_lldp(self):
-  import port_widgets
+  from linkradar.ui import port_widgets
   panel=port_widgets.PortPanel()
   try:
    with patch.object(panel,'refresh'):
@@ -288,7 +292,7 @@ class AsyncSources(unittest.TestCase):
    addresses=dns_resolver.getaddrinfo('127.0.0.1',80,0,1,timeout=.01)
   self.assertEqual(addresses[0][4],('127.0.0.1',80))
  def test_vmix_api_cannot_execute_query_commands_or_follow_redirects(self):
-  import stream_sources as source
+  from linkradar.stream import stream_sources as source
   from unittest.mock import MagicMock
   with patch.object(source.requests.Session,'get') as get:
    for url in ('http://127.0.0.1:8088/api?Function=StartStreaming','http://127.0.0.1:8088/api#command','http://127.0.0.1:8088/other'):
@@ -299,7 +303,7 @@ class AsyncSources(unittest.TestCase):
    with self.assertRaisesRegex(source.SourceError,'HTTP 302'):source.vmix_api('http://127.0.0.1:8088/api')
    self.assertFalse(get.call_args.kwargs['allow_redirects']);response.raw.read1.assert_not_called()
  def test_vmix_transport_error_is_sanitized(self):
-  import stream_sources as source
+  from linkradar.stream import stream_sources as source
   from unittest.mock import MagicMock
   from urllib3.exceptions import ReadTimeoutError
   response=MagicMock();response.__enter__.return_value=response;response.status_code=200
@@ -319,7 +323,8 @@ class AsyncSources(unittest.TestCase):
   m.stream('test',100,state='live');m.sample('test',100);m.last_poll=100
   now[0]=120;snap=m.snapshot(key='test');self.assertEqual(snap['history'],{});self.assertEqual(snap['streams'],[])
  def test_http_selected_adapter_binds_before_connect_and_never_falls_back(self):
-  import bound_http,socket
+  from linkradar.network import bound_http
+  import socket
   from unittest.mock import MagicMock
   rows=[(socket.AF_INET,socket.SOCK_STREAM,6,'',('192.0.2.1',443))]
   sock=MagicMock()
@@ -331,14 +336,15 @@ class AsyncSources(unittest.TestCase):
    with self.assertRaisesRegex(OSError,'unplugged'):bound_http.connect('example.org',443,'en7',2)
    create.assert_not_called()
  def test_http_binding_does_not_change_global_connection_pool_classes(self):
-  import bound_http,urllib3
+  from linkradar.network import bound_http
+  import urllib3
   original=urllib3.poolmanager.pool_classes_by_scheme['https'];a=bound_http.adapter('en7');b=bound_http.adapter('en8')
   try:
    self.assertIs(urllib3.poolmanager.pool_classes_by_scheme['https'],original)
    self.assertIsNot(a.poolmanager.pool_classes_by_scheme['https'],b.poolmanager.pool_classes_by_scheme['https'])
   finally:a.close();b.close()
  def test_stream_errors_and_statistics_do_not_retain_url_secrets(self):
-  import stream_sources as source
+  from linkradar.stream import stream_sources as source
   address='http://login:very-private-password@192.0.2.1:8088/api'
   with patch.object(source.requests.Session,'get',side_effect=OSError('unreachable')):
    with self.assertRaises(source.SourceError) as caught:source.vmix_api(address)
@@ -354,7 +360,7 @@ class QtBackgroundWork(unittest.TestCase):
  def setUpClass(cls):cls.app=desktop.QApplication.instance() or desktop.QApplication([])
  def test_slow_command_does_not_block_qt_and_close_waits_without_destroying_thread(self):
   release=threading.Event();entered=threading.Event();ticks=[]
-  import ui_tasks
+  from linkradar.ui import ui_tasks
   from PySide6.QtCore import QTimer
   queue=ui_tasks.IOQueue();queue.start();timer=QTimer();timer.timeout.connect(lambda:ticks.append(time.monotonic()));timer.start(5)
   queue.submit(lambda:(entered.set(),release.wait(2)))
@@ -412,7 +418,7 @@ class QtBackgroundWork(unittest.TestCase):
     doc=json.loads(text.split('\n\n',1)[1]);self.assertEqual(len(doc['samples']),5)
    finally:store.db.close()
  def test_failed_interval_change_restores_the_actual_interval(self):
-  with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    w=desktop.Window(Path(folder));w.timer.stop();w.address.setText('192.0.2.1');w.toggle();old=w.interval.currentData()
    try:
     with patch.object(w.monitor,'set_interval',side_effect=OSError('failed')),patch.object(desktop.QMessageBox,'warning'):

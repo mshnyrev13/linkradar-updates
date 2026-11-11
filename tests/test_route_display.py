@@ -4,7 +4,7 @@ os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import desktop
+from linkradar.ui import desktop
 from PySide6.QtGui import QPainter,QImage
 from PySide6.QtCore import QRectF,QCoreApplication,QEvent
 

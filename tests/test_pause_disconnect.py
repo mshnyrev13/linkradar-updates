@@ -4,7 +4,10 @@ import sys,time,tempfile,threading,gc,unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import desktop,server,background_engine,port_widgets as ui,graphene_port as source
+from linkradar.ui import desktop, port_widgets as ui
+from linkradar.core import server
+from linkradar.system import background_engine
+from linkradar.network import graphene_port as source
 from PySide6.QtCore import QCoreApplication,QEvent
 
 
@@ -44,7 +47,7 @@ class PauseEngine(unittest.TestCase):
    time.sleep(.01)
   self.fail('State did not settle')
  def test_inflight_ping_is_discarded_and_same_session_continues(self):
-  with tempfile.TemporaryDirectory() as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  with tempfile.TemporaryDirectory() as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    store=server.Store(Path(folder)/'db');monitor=server.Monitor(store)
    sid=monitor.start({'continuous':True,'interval':.5,'timeout':.5,'targets':[{'host':'ya.ru'}]});config=monitor.config;target=config['targets'][0]
    inflight=threading.Event();release=threading.Event();calls=[]
@@ -66,7 +69,7 @@ class PauseEngine(unittest.TestCase):
     finally:
      release.set();monitor.stop();worker.join(4);self.wait_for(lambda:monitor.sid is None);store.db.close()
  def test_pause_cancels_inflight_traceroute(self):
-  with tempfile.TemporaryDirectory() as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  with tempfile.TemporaryDirectory() as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    store=server.Store(Path(folder)/'db');monitor=server.Monitor(store);sid=monitor.start({'continuous':True,'targets':[{'host':'192.0.2.1'}]})
    entered=threading.Event();cancelled=threading.Event()
    def trace(ip,timeout,max_hops,cancel,save):
@@ -81,7 +84,7 @@ class PauseEngine(unittest.TestCase):
      self.assertEqual(store.rows('SELECT * FROM hop_samples'),[]);self.assertEqual(store.rows('SELECT * FROM routes'),[])
     finally:monitor.stop();worker.join(3);self.wait_for(lambda:monitor.sid is None);store.db.close()
  def test_background_pause_survives_gui_reconnect_and_recovery(self):
-  with tempfile.TemporaryDirectory(prefix='nw-') as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  with tempfile.TemporaryDirectory(prefix='nw-') as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    stop=threading.Event();worker=threading.Thread(target=background_engine.run,args=(folder,stop));worker.start()
    try:
     self.wait_for(lambda:background_engine.connect(folder) is not None)

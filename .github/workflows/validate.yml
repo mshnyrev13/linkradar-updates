@@ -34,6 +34,14 @@ jobs:
       - run: python tests/integration_local.py
       - run: node tests/test_start_stop.js
       - run: node tests/test_stream_analysis.js
+      - name: Build and verify macOS package
+        if: runner.os == 'macOS'
+        run: |
+          python -m pip install pyinstaller==6.22.3
+          python packaging/build-macos.py --output dist/macos --dmg
+          export NETWORK_WATCH_PREVIEW="$RUNNER_TEMP/linkradar.png"
+          dist/macos/dist/LinkRadar.app/Contents/MacOS/LinkRadar --smoke-test --no-discovery --smoke-report "$RUNNER_TEMP/linkradar.json"
+          python -c 'import json, sys; assert json.load(open(sys.argv[1], encoding="utf-8"))["targets"]' "$RUNNER_TEMP/linkradar.json"
 
   windows-installer:
     name: Build and verify Windows installer
@@ -61,7 +69,7 @@ jobs:
         run: |
           $setup = Get-ChildItem dist/windows/*-Setup.exe | Select-Object -First 1
           if (!$setup) { throw 'Missing LinkRadar installer' }
-          python packaging/smoke_windows_setup.py "$($setup.FullName)"
+          python packaging/windows/smoke_windows_setup.py "$($setup.FullName)"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           path: dist/windows/*-Setup.exe

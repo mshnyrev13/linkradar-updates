@@ -8,8 +8,10 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QPointF,Qt
 from PySide6.QtWidgets import QApplication
-import desktop,port_widgets,stream_widgets,stream_monitor,graphene_port
-from plot_sampling import nearest_point,line_samples
+from linkradar.ui import desktop, port_widgets, stream_widgets
+from linkradar.stream import stream_monitor
+from linkradar.network import graphene_port
+from linkradar.core.plot_sampling import nearest_point,line_samples
 
 class RoundTwo(unittest.TestCase):
  @classmethod

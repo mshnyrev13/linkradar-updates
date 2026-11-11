@@ -3,7 +3,7 @@ import sys,tempfile,json,time,unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import server,session_export
+from linkradar.core import server, session_export
 
 class RetentionTests(unittest.TestCase):
  def test_rolling_twelve_hours_across_all_data_and_pause_state(self):

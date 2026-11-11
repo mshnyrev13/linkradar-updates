@@ -9,7 +9,8 @@ from PySide6.QtCore import QPointF
 from PySide6.QtGui import QImage,QPainter
 from PySide6.QtWidgets import QApplication
 from types import SimpleNamespace
-import desktop,stream_widgets,port_widgets,server
+from linkradar.ui import desktop, stream_widgets, port_widgets
+from linkradar.core import server
 from qt_support import close_window,flush_io
 
 
@@ -109,7 +110,7 @@ class RoundFive(unittest.TestCase):
                 finally:p.end();chart.deleteLater()
 
     def test_timestamp_labels_keep_valid_values_and_refuse_invalid_input(self):
-        from time_labels import format_timestamp
+        from linkradar.core.time_labels import format_timestamp
         stamp=1800000000.125
         self.assertEqual(format_timestamp(stamp),time.strftime('%H:%M:%S',time.localtime(stamp)))
         self.assertTrue(format_timestamp(stamp,milliseconds=True).endswith('.125'))
@@ -118,7 +119,7 @@ class RoundFive(unittest.TestCase):
             with self.subTest(value=repr(value)[:30]):self.assertEqual(format_timestamp(value),'—')
 
     def test_packet_model_time_keeps_milliseconds_and_handles_os_range_error(self):
-        import traffic_widgets
+        from linkradar.ui import traffic_widgets
         model=traffic_widgets.FramesModel();model.replace_rows([SimpleNamespace(number=1,ts=1800000000.125)])
         try:
             self.assertTrue(model.data(model.index(0,0)).endswith('.125'))
@@ -159,7 +160,7 @@ class RoundFive(unittest.TestCase):
         finally:panel.shutdown();panel.deleteLater()
 
     def test_failed_stream_export_keeps_target_and_cleans_only_its_temporary(self):
-        import export_transfer
+        from linkradar.core import export_transfer
         panel=stream_widgets.StreamPanel()
         try:
             with tempfile.TemporaryDirectory() as folder:

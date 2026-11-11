@@ -5,12 +5,13 @@ import sys,json,tempfile,time,unittest,sqlite3
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import server,desktop
+from linkradar.core import server
+from linkradar.ui import desktop
 from qt_support import close_window
 from PySide6.QtWidgets import QApplication,QPlainTextEdit
 from PySide6.QtGui import QTextCursor
-from plot_sampling import chart_samples
-from log_widgets import update_lines
+from linkradar.core.plot_sampling import chart_samples
+from linkradar.ui.log_widgets import update_lines
 
 class RoundSix(unittest.TestCase):
     @classmethod
@@ -32,7 +33,7 @@ class RoundSix(unittest.TestCase):
             finally:store.db.close()
 
     def test_quiet_event_log_is_not_reformatted_on_each_probe(self):
-        with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+        with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
             w=desktop.Window(Path(folder),service_folder=False);w.timer.stop();w.address.setText('192.0.2.1');w.toggle()
             try:
                 snap=w.monitor.snapshot(w.sid,300,compact=True);now=time.time()

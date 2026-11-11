@@ -8,11 +8,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock,patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import network_info as n
-import measurement_display as display
-import session_export
-import desktop
-import stream_widgets as ui
+from linkradar.network import network_info as n
+from linkradar.ui import measurement_display as display
+from linkradar.core import session_export
+from linkradar.ui import desktop
+from linkradar.ui import stream_widgets as ui
 from qt_support import production_application,managed_window,settle_layout
 from test_network_info import frame
 from test_discovery_feedback import cdp_frame,FakeStop

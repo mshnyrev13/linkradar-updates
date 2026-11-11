@@ -18,17 +18,17 @@ from unittest.mock import Mock
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-import background_engine as ipc
-import error_log
-import graphene_port
-import interface_probes
-import ipc_transport
-import network_info
-import server
-import service_paths
-import stream_sources
-import traffic_capture
-import bound_http
+from linkradar.system import background_engine as ipc
+from linkradar.core import error_log
+from linkradar.network import graphene_port
+from linkradar.network import interface_probes
+from linkradar.system import ipc_transport
+from linkradar.network import network_info
+from linkradar.core import server
+from linkradar.system import service_paths
+from linkradar.stream import stream_sources
+from linkradar.network import traffic_capture
+from linkradar.network import bound_http
 import requests
 from multiprocessing.connection import Connection as NativeConnection
 
@@ -188,7 +188,7 @@ class IPCIntegration(unittest.TestCase):
     def test_partial_unauthenticated_peers_expire_and_json_is_not_pickle(self):
         with tempfile.TemporaryDirectory(prefix='lr-sec-') as folder, \
              patch.object(server.Monitor,'session_workers',return_value=[]), \
-             patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'),patch.object(ipc,'AUTH_SECONDS',.15):
+             patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'),patch.object(ipc,'AUTH_SECONDS',.15):
             stop=threading.Event();thread=threading.Thread(target=ipc.run,args=(folder,stop));thread.start();peers=[]
             try:
                 end=time.monotonic()+3
@@ -228,7 +228,7 @@ class Distribution(unittest.TestCase):
         self.assertFalse(any('emSign ECC Root CA - G3' in str(c['subject']) for c in context.get_ca_certs()))
 
     def test_speed_test_does_not_follow_untrusted_redirects(self):
-        import speed_test
+        from linkradar.network import speed_test
         import urllib.request
         response=Mock(status_code=302)
         session=Mock();session.request.return_value=response
@@ -242,11 +242,11 @@ class Distribution(unittest.TestCase):
             self.assertIn(requirement,text)
 
     def test_windows_authorization_freezes_script_and_acl_is_exact(self):
-        guard=(ROOT/'packaging/windows-service-safety.ps1').read_text(encoding='utf-8')
+        guard=(ROOT/'packaging/windows/windows-service-safety.ps1').read_text(encoding='utf-8')
         self.assertIn('SetAccessRuleProtection($true,$false)',guard)
         self.assertIn('ReparsePoint',guard)
         for name in ('install-background-windows.ps1','remove-background-windows.ps1'):
-            text=(ROOT/'packaging'/name).read_text(encoding='utf-8')
+            text=(ROOT / 'packaging/windows' / name).read_text(encoding='utf-8')
             self.assertIn('-EncodedCommand',text);self.assertNotIn('-File "',text)
             self.assertNotIn('cmd.exe /d /c',text);self.assertNotIn('$env:ProgramFiles',text)
             elevated=text.split('if (-not $Elevated) {',1)[0]+text.split('\n# Elevated payload begins here.',1)[1]
@@ -256,7 +256,7 @@ class Distribution(unittest.TestCase):
             self.assertIn('[IO.Compression.GZipStream]',text)
             self.assertIn('$env:PSModulePath=[IO.Path]::Combine([Environment]::SystemDirectory',text)
             self.assertIn('$ast.ParamBlock.Extent.Text',text)
-        install=(ROOT/'packaging/install-background-windows.ps1').read_text(encoding='utf-8')
+        install=(ROOT/'packaging/windows/install-background-windows.ps1').read_text(encoding='utf-8')
         self.assertIn('Get-PackageDigest $stage',install)
         self.assertIn('Copy-ServiceTree $source (Join-Path $stage $part)',install)
         self.assertIn('[IO.FileMode]::CreateNew',guard)
@@ -264,11 +264,11 @@ class Distribution(unittest.TestCase):
         self.assertIn('Protect-ServiceDirectory $stage -Private',install)
 
     def test_mac_root_configuration_has_no_user_plist_argument_or_user_log_open(self):
-        text=(ROOT/'packaging/configure-background-mac.sh').read_text(encoding='utf-8')
+        text=(ROOT/'packaging/macos/configure-background-mac.sh').read_text(encoding='utf-8')
         self.assertIn('test "$#" = 2',text);self.assertIn('UserName -string "$task_user"',text)
         self.assertIn('StandardOutPath -string /dev/null',text)
         self.assertIn('StandardErrorPath -string /dev/null',text)
-        wrapper=(ROOT/'packaging/install-background-mac.command').read_text(encoding='utf-8')
+        wrapper=(ROOT/'packaging/macos/install-background-mac.command').read_text(encoding='utf-8')
         self.assertIn('task_payload=$(/bin/cat "$task_configure")',wrapper)
         self.assertNotIn('sudo /bin/sh "$task_configure"',wrapper)
         self.assertNotIn('quoted form of item 1 of argv & " " & quoted form of item 2',wrapper)

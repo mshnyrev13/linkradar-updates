@@ -4,7 +4,6 @@ import argparse
 import os
 from pathlib import Path
 import platform
-import re
 import shutil
 import subprocess
 import sys
@@ -12,9 +11,11 @@ import tempfile
 import urllib.request
 import zipfile
 
-import build_manifest
+from payload import check_clean_payload, digest, remove_documentation
 
 ROOT = Path(__file__).resolve().parents[1]
+WINDOWS = ROOT / "packaging/windows"
+BRANDING = ROOT / "linkradar/branding"
 PYTHON_VERSION = "3.13.17"
 PYTHON_SHA256 = "9e35319bffedab8b36ad44d8f377cb4f1733bcec257a0b6d04d94f01486ddb38"
 PYTHON_URL = f"https://www.python.org/ftp/python/{PYTHON_VERSION}/python-{PYTHON_VERSION}-embed-amd64.zip"
@@ -28,7 +29,7 @@ SERVICE_FILES = (
 
 
 def extract_runtime(archive, runtime):
-    if build_manifest.digest(archive) != PYTHON_SHA256:
+    if digest(archive) != PYTHON_SHA256:
         raise ValueError("Embedded Python SHA-256 does not match the pinned python.org release")
     with zipfile.ZipFile(archive) as source:
         source.extractall(runtime)
@@ -39,13 +40,13 @@ def extract_runtime(archive, runtime):
 
 def compile_launcher(stage, work):
     resources = work / "LinkRadar.rc"
-    icon = (ROOT / "branding/NetworkWatch.ico").as_posix()
+    icon = (BRANDING / "NetworkWatch.ico").as_posix()
     resources.write_text(f'1 ICON "{icon}"\n', encoding="utf-16")
     subprocess.run(["rc", "/nologo", "/fo", "LinkRadar.res", resources.name], cwd=work, check=True)
     subprocess.run(
         [
             "cl", "/nologo", "/W4", "/WX", "/O2", "/MT",
-            str(ROOT / "packaging/windows_launcher.c"), "LinkRadar.res",
+            str(WINDOWS / "windows_launcher.c"), "LinkRadar.res",
             f"/Fe:{stage / 'LinkRadar.exe'}", "kernel32.lib", "user32.lib",
             "/link", "/MACHINE:X64", "/SUBSYSTEM:WINDOWS",
         ],
@@ -81,35 +82,46 @@ def build(out, iscc, redist, version):
         scripts = stage / "packages/bin"
         if scripts.is_dir():
             shutil.rmtree(scripts)
-        for module in sorted(ROOT.glob("*.py")):
-            shutil.copy2(module, app / module.name)
-        branding = app / "branding"
+        qt = stage / "packages/PySide6"
+        for name in ("doc", "glue", "include", "lib", "metatypes", "qml", "scripts", "typesystems"):
+            folder = qt / name
+            if folder.is_dir():
+                shutil.rmtree(folder)
+        for pattern in ("*.exe", "*.lib", "*.pyi"):
+            for file in qt.glob(pattern):
+                file.unlink()
+
+        package = app / "linkradar"
+        for module in sorted((ROOT / "linkradar").rglob("*.py")):
+            target = package / module.relative_to(ROOT / "linkradar")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(module, target)
+        branding = package / "branding"
         branding.mkdir()
         for name in ("NetworkWatch.ico", "network-watch-logo.png"):
-            shutil.copy2(ROOT / "branding" / name, branding / name)
+            shutil.copy2(BRANDING / name, branding / name)
+        support = stage / "support"
+        support.mkdir()
         for name in SERVICE_FILES:
-            shutil.copy2(ROOT / "packaging" / name, stage / name)
-        shutil.copy2(ROOT / "docs/windows.md", stage / "README.md")
-        build_manifest.save(
-            ROOT, stage / "BUILD-MANIFEST.json", version,
-            platform="Windows-x64", python_version=PYTHON_VERSION, python_sha256=PYTHON_SHA256,
-        )
+            shutil.copy2(WINDOWS / name, support / name)
+        remove_documentation(stage)
+        check_clean_payload(stage)
         compile_launcher(stage, work)
         subprocess.run(
             [str(runtime / "python.exe"), "-B", "-c",
-             "import desktop, certifi, requests, truststore; print(desktop.server.VERSION)"],
+             "from linkradar.ui import desktop; import certifi, requests, truststore; print(desktop.server.VERSION)"],
             cwd=work,
             check=True,
         )
         subprocess.run(
             [
                 str(iscc), f"/DAppVersion={version}", f"/DPayloadDir={stage}",
-                f"/DOutputFolder={out}", str(ROOT / "packaging/windows_setup.iss"),
+                f"/DOutputFolder={out}", str(WINDOWS / "windows_setup.iss"),
             ],
             check=True,
         )
     installer = out / f"LinkRadar-{version}-Windows-x64-Setup.exe"
-    print(f"{build_manifest.digest(installer)}  {installer.name}")
+    print(f"{digest(installer)}  {installer.name}")
 
 
 def main():
@@ -125,11 +137,9 @@ def main():
     redist = sorted(path.parent for path in redist_root.glob("Microsoft.VC*.CRT/msvcp140.dll"))
     if len(redist) != 1:
         parser.error("The x64 Visual C++ redistributable directory was not found")
-    source = (ROOT / "server.py").read_text(encoding="utf-8")
-    version = re.search(r'^VERSION = "(\d+\.\d+\.\d+)"$', source, re.MULTILINE)
-    if not version:
-        parser.error("Expected VERSION = \"X.Y.Z\" in server.py")
-    build(args.out.resolve(), args.iscc.resolve(), redist[0], version[1])
+    sys.path.insert(0, str(ROOT))
+    from linkradar import VERSION
+    build(args.out.resolve(), args.iscc.resolve(), redist[0], VERSION)
 
 
 if __name__ == "__main__":

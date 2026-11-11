@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch,MagicMock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import desktop
+from linkradar.ui import desktop
 from PySide6.QtCore import QCoreApplication,QEvent,QPoint
 from PySide6.QtWidgets import QProgressBar
 
@@ -98,7 +98,7 @@ class NativeControls(unittest.TestCase):
             w.deleteLater();QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
 
     def test_close_clears_local_session_and_ignores_queued_results(self):
-        with tempfile.TemporaryDirectory() as folder,patch.object(desktop.server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+        with tempfile.TemporaryDirectory() as folder,patch.object(desktop.server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
             w=desktop.Window(Path(folder));w.timer.stop()
             config=desktop.server.validate_config({'continuous':True,'targets':[{'host':'192.0.2.1'}]})
             w.start_session(config)

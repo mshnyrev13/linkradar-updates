@@ -1,7 +1,7 @@
 import sys, unittest,struct
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import network_info as n
+from linkradar.network import network_info as n
 
 def tlv(kind,value):return struct.pack('!H',kind<<9|len(value))+value
 

@@ -11,13 +11,13 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QPointF
-import desktop
-import server
-import stream_monitor
-import stream_sources
-import stream_widgets
-import measurement_metrics
-from plot_sampling import probe_samples
+from linkradar.ui import desktop
+from linkradar.core import server
+from linkradar.stream import stream_monitor
+from linkradar.stream import stream_sources
+from linkradar.ui import stream_widgets
+from linkradar.core import measurement_metrics
+from linkradar.core.plot_sampling import probe_samples
 
 
 def obs(skipped):

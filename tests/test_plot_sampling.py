@@ -1,7 +1,7 @@
 import sys,unittest
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from plot_sampling import chart_samples
+from linkradar.core.plot_sampling import chart_samples
 
 class PlotSampling(unittest.TestCase):
  def test_pixel_limit_preserves_both_series_extrema_and_state(self):
