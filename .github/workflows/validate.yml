@@ -42,6 +42,12 @@ jobs:
           export NETWORK_WATCH_PREVIEW="$RUNNER_TEMP/linkradar.png"
           dist/macos/dist/LinkRadar.app/Contents/MacOS/LinkRadar --smoke-test --no-discovery --smoke-report "$RUNNER_TEMP/linkradar.json"
           python -c 'import json, sys; assert json.load(open(sys.argv[1], encoding="utf-8"))["targets"]' "$RUNNER_TEMP/linkradar.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: runner.os == 'macOS'
+        with:
+          path: dist/macos/*-macOS-arm64.dmg
+          archive: false
+          if-no-files-found: error
 
   windows-installer:
     name: Build and verify Windows installer

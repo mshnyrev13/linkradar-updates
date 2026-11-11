@@ -1,5 +1,5 @@
 """Regressions from the 2.9.3 audit; synthetic data, no hardware/network probes."""
-from qt_support import close_window,flush_io
+from qt_support import close_window,flush_io,managed_window
 import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 import io,json,tempfile,time,threading,unittest,sys
@@ -17,14 +17,18 @@ class Correctness(unittest.TestCase):
  def setUpClass(cls):cls.app=desktop.QApplication.instance() or desktop.QApplication([])
  def test_current_values_do_not_come_from_peak_bucket(self):
   with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
-   w=desktop.Window(Path(folder));w.timer.stop();w.address.setText('192.0.2.1');w.toggle();sid=w.sid;tid=w.monitor.config['targets'][0]['id'];now=time.time()
-   w.store.execute('UPDATE sessions SET started=? WHERE id=?',(now-451,sid))
-   w.store.db.executemany('INSERT INTO samples VALUES (?,?,?,?,?,?,?)',((sid,tid,now-451+i*.5,'ok',200 if i==900 else 10,'192.0.2.1','') for i in range(902)));w.store.db.commit()
-   try:
+   with managed_window(desktop.Window(Path(folder))) as w:
+    w.timer.stop()
+    w.address.setText('192.0.2.1')
+    w.toggle()
+    sid=w.sid;tid=w.monitor.config['targets'][0]['id'];now=time.time()
+    with w.store.lock,w.store.db:
+     w.store.db.execute('UPDATE sessions SET started=? WHERE id=?',(now-451,sid))
+     w.store.db.executemany('INSERT INTO samples VALUES (?,?,?,?,?,?,?)',
+         ((sid,tid,now-451+i*.5,'ok',200 if i==900 else 10,'192.0.2.1','') for i in range(902)))
     for period in (600,3600,43200):
      snap=w.monitor.snapshot(sid,period);w.render(snap)
      self.assertEqual(w.route_summary.current,10);self.assertEqual(w.cards[0].text(),'23,0 мс')
-   finally:close_window(w);w.store.db.close();w.deleteLater();QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
  def test_stale_probe_not_presented_as_live(self):
   with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    w=desktop.Window(Path(folder));w.timer.stop();w.address.setText('192.0.2.1');w.toggle();sid=w.sid;tid=w.monitor.config['targets'][0]['id']
