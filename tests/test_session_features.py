@@ -5,7 +5,9 @@ import sys,json,tempfile,time,threading,gc,unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import desktop,server,session_export,background_engine
+from linkradar.ui import desktop
+from linkradar.core import server, session_export
+from linkradar.system import background_engine
 from PySide6.QtCore import QCoreApplication,QEvent
 
 class SessionExport(unittest.TestCase):
@@ -73,17 +75,17 @@ class Controls(unittest.TestCase):
    self.assertGreater(w.speed_button.mapTo(w,w.speed_button.rect().topLeft()).y(),w.address.mapTo(w,w.address.rect().topLeft()).y())
    self.assertEqual(w.speed_button.parent(),w.address.parent())
  def test_route_parser_uses_probe_rtt_not_process_duration(self):
-  from route_engine import parse_hop
+  from linkradar.network.route_engine import parse_hop
   self.assertEqual(parse_hop(' 3 2a00:1248:7ffd:1::82 21.630 ms')['latency'],21.630)
 
 class BackgroundService(unittest.TestCase):
  def test_pipe_acl_rejects_untrusted_sid_before_loading_windows_api(self):
-  import windows_pipe
+  from linkradar.system import windows_pipe
   with self.assertRaises(ValueError):windows_pipe.configure('S-1-5-21)Everyone')
  @classmethod
  def setUpClass(cls):cls.app=desktop.QApplication.instance() or desktop.QApplication([])
  def test_gui_close_clears_background_session_and_export_data(self):
-  with tempfile.TemporaryDirectory(prefix='nw-') as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  with tempfile.TemporaryDirectory(prefix='nw-') as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    stop=threading.Event();worker=threading.Thread(target=background_engine.run,args=(folder,stop),daemon=True);worker.start()
    deadline=time.monotonic()+5;proxy=None
    while time.monotonic()<deadline:

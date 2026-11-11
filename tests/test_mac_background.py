@@ -8,7 +8,8 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import mac_background, background_engine, server
+from linkradar.system import mac_background, background_engine
+from linkradar.core import server
 
 
 class FirstLaunch(unittest.TestCase):
@@ -74,7 +75,7 @@ class FirstLaunch(unittest.TestCase):
         self.assertIn('--upgrade',run.call_args.args[0])
 
     def test_gui_rejects_old_engine_even_with_compatible_protocol_before_db_open(self):
-        import desktop
+        from linkradar.ui import desktop
         app=desktop.QApplication.instance() or desktop.QApplication([])
         with tempfile.TemporaryDirectory() as folder,patch.object(desktop.background_engine,'connect',return_value=self.service('2.8.1')),patch.object(desktop.server,'Store') as store:
             with self.assertRaisesRegex(RuntimeError,'2.8.1.*'+server.VERSION):desktop.Window(Path(folder),require_service=True)
@@ -96,7 +97,7 @@ class FirstLaunch(unittest.TestCase):
         with patch.object(mac_background.background_engine,'connect',side_effect=[None,None,self.service()]),patch.object(mac_background.subprocess,'run',return_value=Mock(returncode=0)) as run,patch.object(mac_background.time,'sleep'):
             self.assertEqual(mac_background.prepare(self.folder),('ready',''))
             args=run.call_args.args[0];self.assertEqual(args[0],'/bin/sh');self.assertEqual(args[-1],'--gui')
-            self.assertTrue(args[1].endswith('packaging/install-background-mac.command'))
+            self.assertTrue(args[1].endswith('Resources/packaging/install-background-mac.command'))
 
     def test_cancel_authentication_keeps_foreground_available(self):
         with patch.object(mac_background.background_engine,'connect',return_value=None),patch.object(mac_background.subprocess,'run',return_value=Mock(returncode=1)),patch.object(Path,'exists',return_value=False):
@@ -124,7 +125,7 @@ class FirstLaunch(unittest.TestCase):
 
     @unittest.skipIf(sys.platform=='win32','POSIX paths and imports under simulated darwin')
     def test_gui_cannot_recover_database_if_ready_service_disappears(self):
-        import desktop
+        from linkradar.ui import desktop
         app=desktop.QApplication.instance() or desktop.QApplication([])
         with tempfile.TemporaryDirectory() as folder,patch.object(desktop.background_engine,'connect',return_value=None),patch.object(desktop.server,'Store') as store:
             with self.assertRaises(RuntimeError):desktop.Window(Path(folder),require_service=True)
@@ -135,7 +136,7 @@ class ServiceRecovery(unittest.TestCase):
         import json
         import threading
         import time
-        with tempfile.TemporaryDirectory(prefix='lr-upgrade-test-') as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+        with tempfile.TemporaryDirectory(prefix='lr-upgrade-test-') as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
             store=server.Store(Path(folder)/'network.sqlite3',recover=False)
             config=server.validate_config({'continuous':True,'interface':'en0','targets':[{'host':'192.0.2.1'}]})
             started=time.time();sid='same-session';target=config['targets'][0]['id']

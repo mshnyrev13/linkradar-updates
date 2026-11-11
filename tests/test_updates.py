@@ -10,7 +10,7 @@ import time
 import unittest
 from unittest.mock import patch,MagicMock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import update_checker as updates
+from linkradar.ui import update_checker as updates
 from qt_support import close_window
 from PySide6.QtWidgets import QApplication
 
@@ -80,7 +80,7 @@ class UpdateUiTests(unittest.TestCase):
         checker=updates.UpdateChecker('2.10.6',fetcher=lambda stop:feed('2.10.6'));done=[];checker.checked.connect(done.append)
         checker.check(True);self.drain(checker);self.assertEqual(done,[True]);checker.shutdown()
     def test_window_offer_and_browser_open_do_not_replace_app(self):
-        import desktop
+        from linkradar.ui import desktop
         with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'):
             window=desktop.Window(Path(folder));window.timer.stop();window.show();self.app.processEvents()
             self.assertFalse(window.update_banner.isVisible());self.assertFalse(window.updater.initial.isActive())

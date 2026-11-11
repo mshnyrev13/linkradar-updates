@@ -13,12 +13,12 @@ import unittest
 from unittest.mock import patch,Mock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from qt_support import production_application,managed_window
-import desktop
-import graphene_port as source
-import port_widgets
-import text_export
-import export_transfer
-import stream_widgets
+from linkradar.ui import desktop
+from linkradar.network import graphene_port as source
+from linkradar.ui import port_widgets
+from linkradar.ui import text_export
+from linkradar.core import export_transfer
+from linkradar.ui import stream_widgets
 from qt_support import flush_report
 from PySide6.QtCore import Qt,QPoint
 from PySide6.QtGui import QContextMenuEvent,QKeySequence

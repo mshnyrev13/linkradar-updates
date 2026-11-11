@@ -15,7 +15,10 @@ import time
 import unittest
 from unittest.mock import patch,MagicMock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import interface_probes as probes,server,route_engine,desktop,background_engine
+from linkradar.network import interface_probes as probes, route_engine
+from linkradar.core import server
+from linkradar.ui import desktop
+from linkradar.system import background_engine
 from PySide6.QtCore import QCoreApplication,QEvent
 
 BIND={'id':'en7','index':7,'source':'192.0.2.10'}
@@ -138,7 +141,7 @@ class AdapterSwitch(unittest.TestCase):
  @classmethod
  def setUpClass(cls):cls.app=desktop.QApplication.instance() or desktop.QApplication([])
  def test_gui_selection_updates_active_engine_and_preserves_pause(self):
-  with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    w=desktop.Window(Path(folder));w.timer.stop()
    try:
     w.address.setText('192.0.2.1');w.toggle();sid=w.sid;w.toggle();self.assertTrue(w.monitor.paused)
@@ -148,7 +151,7 @@ class AdapterSwitch(unittest.TestCase):
     w.nic.setCurrentIndex(0);self.assertIsNone(w.monitor.config['interface'])
    finally:close_window(w);w.store.db.close();w.deleteLater();QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
  def test_switch_discards_old_inflight_probe(self):
-  with tempfile.TemporaryDirectory() as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  with tempfile.TemporaryDirectory() as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    store=server.Store(Path(folder)/'network.sqlite3');monitor=server.Monitor(store);sid=monitor.start({'continuous':True,'interface':'en0','interval':.5,'timeout':.5,'targets':[{'host':'192.0.2.1'}]})
    entered=threading.Event();released=threading.Event();new=threading.Event()
    def fake(target,timeout,ip,interface=None,stop=None):
@@ -164,7 +167,7 @@ class AdapterSwitch(unittest.TestCase):
     finally:monitor.stop();released.set();worker.join(3);monitor.clear();store.db.close()
 
  def test_ipc_changes_binding_without_creating_new_session(self):
-  with tempfile.TemporaryDirectory(prefix='nw-bind-') as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  with tempfile.TemporaryDirectory(prefix='nw-bind-') as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    stop=threading.Event();worker=threading.Thread(target=background_engine.run,args=(folder,stop));worker.start()
    try:
     deadline=time.monotonic()+3;proxy=None
@@ -177,7 +180,7 @@ class AdapterSwitch(unittest.TestCase):
    finally:
     stop.set();worker.join(5);self.assertFalse(worker.is_alive())
  def test_old_route_reply_is_discarded_on_interface_switch(self):
-  with tempfile.TemporaryDirectory() as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  with tempfile.TemporaryDirectory() as folder,patch.object(server.Monitor,'session_workers',return_value=[]),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    store=server.Store(Path(folder)/'network.sqlite3');monitor=server.Monitor(store);sid=monitor.start({'continuous':True,'interface':'en0','interval':.5,'timeout':.5,'targets':[{'host':'192.0.2.1'}]})
    entered=threading.Event();released=threading.Event();new=threading.Event()
    def trace(ip,timeout,max_hops,cancel,save,interface=None):

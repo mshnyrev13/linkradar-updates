@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import server
+from linkradar.core import server
 
 
 def ok(*args, **kwargs):
@@ -29,7 +29,7 @@ class WorkerResilienceTests(unittest.TestCase):
         self.folder = tempfile.TemporaryDirectory()
         self.store = server.Store(Path(self.folder.name) / 'test.sqlite3', retention_seconds=server.RETENTION_SECONDS)
         self.monitor = server.Monitor(self.store)
-        patcher = patch('power_guard.PowerGuard.start')
+        patcher = patch('linkradar.system.power_guard.PowerGuard.start')
         patcher.start()
         self.addCleanup(patcher.stop)
 

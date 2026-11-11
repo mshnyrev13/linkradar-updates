@@ -10,9 +10,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import server
-from route_engine import parse_hop, route_command, trace_cycle
-from packet_tools import PacketTools, tool
+from linkradar.core import server
+from linkradar.network.route_engine import parse_hop, route_command, trace_cycle
+from linkradar.network.packet_tools import PacketTools, tool
 
 
 def fixture_pcap():
@@ -46,7 +46,7 @@ class Routes(unittest.TestCase):
     def test_tcp_refusal_and_timeout_remain_distinct(self):
         target={'host':'127.0.0.1','mode':'tcp','port':12345}
         for error,status in ((ConnectionRefusedError(),'refused'),(socket.timeout(),'timeout')):
-            with self.subTest(status=status),patch('server.socket.create_connection',side_effect=error):
+            with self.subTest(status=status),patch('linkradar.core.server.socket.create_connection',side_effect=error):
                 result=server.probe(target,.5,ip='127.0.0.1')
                 self.assertEqual(result['status'],status)
                 self.assertIsNone(result['latency'])
@@ -57,12 +57,12 @@ class Routes(unittest.TestCase):
         self.assertEqual(h['status'], 'timeout'); self.assertIsNone(h['latency'])
         self.assertEqual(parse_hop(' 1 <1 мс 2 мс 3 мс 192.0.2.1')['latency'], 2)
         self.assertIn('-6', route_command('::1', 1, 12, 'Windows'))
-        with patch('route_engine.shutil.which', return_value='/usr/sbin/traceroute6'):
+        with patch('linkradar.network.route_engine.shutil.which', return_value='/usr/sbin/traceroute6'):
             self.assertIn('-I', route_command('::1', 1, 12, 'Darwin'))
 
     def test_cancel_terminates_slow_process(self):
         stop=threading.Event(); threading.Timer(.15,stop.set).start()
-        with patch('route_engine.route_command', return_value=[sys.executable,'-c','import time; time.sleep(10)']):
+        with patch('linkradar.network.route_engine.route_command', return_value=[sys.executable,'-c','import time; time.sleep(10)']):
             started=time.monotonic(); result=trace_cycle('127.0.0.1',1,12,stop)
         self.assertLess(time.monotonic()-started,2)
         self.assertEqual(result['hops'], [])
@@ -91,7 +91,7 @@ class Routes(unittest.TestCase):
             def fake(*args):
                 threading.Timer(.05,stop.set).start()
                 return {'hops':[], 'state':'partial'}
-            with patch('server.trace_cycle',side_effect=fake),patch('server.resolve',return_value='192.0.2.2'):
+            with patch('linkradar.core.server.trace_cycle',side_effect=fake),patch('linkradar.core.server.resolve',return_value='192.0.2.2'):
                 monitor.route_worker('s',t,config,time.time(),stop)
             rows=store.rows('SELECT * FROM samples');self.assertEqual(rows[0]['status'],'error')
             self.assertIsNone(server.metrics(rows)['loss']);store.db.close()
@@ -112,7 +112,7 @@ class Routes(unittest.TestCase):
             def fake_probe(target,timeout,ip=None):
                 return {'ts':time.time(),'ip':'192.0.2.2','status':'ok','latency':12.,'detail':''}
             try:
-                with patch('server.trace_cycle',side_effect=fake_trace),patch('server.probe',side_effect=fake_probe),patch('server.resolve',return_value='192.0.2.2'),patch('server.socket.gethostbyaddr',return_value=('router.example',[],[])):
+                with patch('linkradar.core.server.trace_cycle',side_effect=fake_trace),patch('linkradar.core.server.probe',side_effect=fake_probe),patch('linkradar.core.server.resolve',return_value='192.0.2.2'),patch('linkradar.core.server.socket.gethostbyaddr',return_value=('router.example',[],[])):
                     sid=m.start({'interval':.5,'timeout':.5,'route_interval':.5,'targets':[{'host':'192.0.2.2','mode':'icmp'}]})
                     try:
                         deadline=time.monotonic()+5

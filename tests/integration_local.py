@@ -13,8 +13,8 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import server
-import packet_tools
+from linkradar.core import server
+from linkradar.network import packet_tools
 
 
 class LocalIntegration(unittest.TestCase):

@@ -19,8 +19,8 @@ from unittest.mock import patch
 from pathlib import Path
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import stream_sources as sources
-import stream_monitor
+from linkradar.stream import stream_sources as sources
+from linkradar.stream import stream_monitor
 
 def frame(payload,opcode=1):
     payload=payload.encode() if isinstance(payload,str) else payload;size=len(payload)
@@ -339,11 +339,11 @@ class Monitor(unittest.TestCase):
 class Widgets(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        import desktop
+        from linkradar.ui import desktop
         from qt_support import production_application
         cls.desktop=desktop;cls.app=production_application(cls)
     def test_stream_panel_renders_streams_charts_and_vmix_table(self):
-        import stream_widgets
+        from linkradar.ui import stream_widgets
         clock=Clock();monitor=stream_monitor.StreamMonitor(clock=clock);helper=Monitor()
         for i in range(5):helper.poll(monitor,clock,obs_data(10+i,1_000_000*(i+1),i*2),vmix_rows=sources.parse_vmix_rows([],[['Output','0','0','0','0','Fullscreen Dropped: 0 0 %d (40ms)'%i,'']]))
         panel=stream_widgets.StreamPanel(lambda:['сеть ок'],monitor=monitor)
@@ -376,7 +376,7 @@ class Widgets(unittest.TestCase):
             finally:
                 close_window(w);w.store.db.close();w.deleteLater();QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete)
     def test_columns_are_resizable_and_share_width_in_user_proportions(self):
-        import stream_widgets
+        from linkradar.ui import stream_widgets
         from PySide6.QtWidgets import QHeaderView,QPushButton
         panel=stream_widgets.StreamPanel(monitor=stream_monitor.StreamMonitor())
         try:

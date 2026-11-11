@@ -17,9 +17,9 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import background_engine
-import server
-import service_paths
+from linkradar.system import background_engine
+from linkradar.core import server
+from linkradar.system import service_paths
 
 SID = 'S-1-5-21-1111111111-2222222222-3333333333-1001'
 WINDOWS = os.name == 'nt'
@@ -199,7 +199,7 @@ class WindowsSecurity(unittest.TestCase):
 
     def test_installer_scripts_compute_the_same_folder_id(self):
         for name in ('install-background-windows.ps1', 'remove-background-windows.ps1'):
-            text = (ROOT / 'packaging' / name).read_text(encoding='utf-8')
+            text = (ROOT / 'packaging/windows' / name).read_text(encoding='utf-8')
             function = re.search(r'function Get-ServiceId\(.*?\n\}', text, re.S).group(0)
             command = function + "\nGet-ServiceId '" + SID + "'"
             result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command], capture_output=True, text=True, timeout=60)
@@ -262,10 +262,10 @@ class Engine(unittest.TestCase):
             (Path(folder) / 'service.key').write_bytes(os.urandom(32))
             if os.name!='nt':(Path(folder) / 'service.key').chmod(0o600)
         with tempfile.TemporaryDirectory(prefix='nw-svc-') as temp, patch.object(server.Monitor, 'session_workers', return_value=[]), \
-                patch('power_guard.PowerGuard.start'), patch('power_guard.PowerGuard.stop'), \
+                patch('linkradar.system.power_guard.PowerGuard.start'), patch('linkradar.system.power_guard.PowerGuard.stop'), \
                 patch.object(background_engine.service_paths, 'prepare', side_effect=prepare), \
                 patch.object(background_engine.service_paths, 'write_key', side_effect=write_key), \
-                patch('windows_pipe.configure', side_effect=lambda sid: calls.append('pipe')):
+                patch('linkradar.system.windows_pipe.configure', side_effect=lambda sid: calls.append('pipe')):
             folder = Path(temp) / 'engine'
             stop, worker, proxy = self.start(folder, user_sid=SID)
             try:
@@ -280,7 +280,7 @@ class Engine(unittest.TestCase):
 
     def test_gui_session_data_goes_through_validated_ipc(self):
         with tempfile.TemporaryDirectory(prefix='nw-ipc-') as folder, patch.object(server.Monitor, 'session_workers', return_value=[]), \
-                patch('power_guard.PowerGuard.start'), patch('power_guard.PowerGuard.stop'):
+                patch('linkradar.system.power_guard.PowerGuard.start'), patch('linkradar.system.power_guard.PowerGuard.stop'):
             stop, worker, proxy = self.start(folder)
             try:
                 sid = proxy.start(server.validate_config({'targets': [{'host': 'ya.ru'}]}))
@@ -310,7 +310,7 @@ class Launch(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         global desktop
-        import desktop
+        from linkradar.ui import desktop
 
     def test_windows_task_names_only_the_user(self):
         with patch.object(desktop.background_engine, 'run') as run:

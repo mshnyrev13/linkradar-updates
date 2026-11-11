@@ -36,7 +36,7 @@ elif name=='launchctl':
   if (root/'fail-once').exists():(root/'fail-once').unlink();sys.exit(1)
   loaded.touch()
 '''.replace('PYTHON',sys.executable).replace('ROOT',repr(str(self.root)))
-        text=(ROOT/'packaging/configure-background-mac.sh').read_text(encoding='utf-8')
+        text=(ROOT/'packaging/macos/configure-background-mac.sh').read_text(encoding='utf-8')
         for command in ('/usr/bin/id','/usr/bin/dscl','/usr/bin/stat','/usr/bin/install','/bin/launchctl'):
             target=self.bin/Path(command).name;target.write_text(fake);target.chmod(0o755);text=text.replace(command,str(target))
         text=text.replace('/Library/LaunchDaemons',str(self.daemons)).replace('/private/tmp/linkradar-launchd.',str(self.root/'stage.'))
@@ -89,7 +89,7 @@ elif name=='launchctl':
                         'pathlib.Path('+repr(str(payload))+').write_text("printf MUTATED > '+str(marker)+'")\n'+
                         'subprocess.run(["/bin/sh","-c",sys.argv[2],"sh",*sys.argv[3:]],check=True)\n')
         stub.chmod(0o755)
-        source=(ROOT/'packaging/install-background-mac.command').read_text(encoding='utf-8')
+        source=(ROOT/'packaging/macos/install-background-mac.command').read_text(encoding='utf-8')
         source=source.replace('/Applications/LinkRadar.app/Contents/MacOS/LinkRadar',str(app)).replace('/usr/bin/osascript',str(stub))
         source=source.replace('task_user=$(id -un)','task_user=tester').replace('task_uid=$(id -u)','task_uid=501')
         source=source.replace('test "$(id -u)" != 0','test 501 != 0')

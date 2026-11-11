@@ -3,8 +3,8 @@ from pathlib import Path
 from unittest.mock import Mock,patch
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import graphene_port as g
-import port_widgets as ui
+from linkradar.network import graphene_port as g
+from linkradar.ui import port_widgets as ui
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QCoreApplication,QEvent
 

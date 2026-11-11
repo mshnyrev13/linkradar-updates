@@ -6,8 +6,9 @@ from pathlib import Path
 from collections import deque
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import stream_monitor as engine,stream_widgets
-from plot_sampling import line_samples
+from linkradar.stream import stream_monitor as engine
+from linkradar.ui import stream_widgets
+from linkradar.core.plot_sampling import line_samples
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QImage,QPainter,QColor
 from PySide6.QtCore import QThread
@@ -21,7 +22,7 @@ class RoundSeven(unittest.TestCase):
   summary=m.summary('s',30,now=100)
   self.assertEqual(summary['samples'],1);self.assertEqual(summary['bitrate']['avg'],10)
  def test_numeric_time_labels_match_system_formats_including_fractional_time(self):
-  from time_labels import format_timestamp
+  from linkradar.core.time_labels import format_timestamp
   for stamp in (0,1.125,1700000000.999,1800000000.125,2147483647.5):
    for utc in (False,True):
     calendar=(time.gmtime if utc else time.localtime)(stamp)
@@ -102,9 +103,10 @@ class RoundSeven(unittest.TestCase):
     p.copy_report();flush_report(p);self.assertEqual(copied,['retry report'])
   finally:p.shutdown();p.deleteLater();self.app.processEvents()
  def test_network_reader_captures_widgets_before_background_thread(self):
-  import desktop,server
-  from ui_tasks import Call
-  with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  from linkradar.ui import desktop
+  from linkradar.core import server
+  from linkradar.ui.ui_tasks import Call
+  with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    w=desktop.Window(Path(folder),service_folder=False);w.timer.stop();w.sid='synthetic';calls=[]
    try:
     w.network_fields['ip'].setText('192.0.2.10');reader=w.network_report_job();w.network_fields['ip'].setText('CHANGED')
@@ -114,8 +116,8 @@ class RoundSeven(unittest.TestCase):
     self.assertEqual(calls,[True]);self.assertIn('192.0.2.10',job.result[0]);self.assertNotIn('CHANGED',job.result[0]);job.deleteLater()
    finally:close_window(w);w.store.db.close();w.deleteLater();self.app.processEvents()
  def test_close_waits_for_pending_report_without_late_clipboard_write(self):
-  import desktop
-  with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch('power_guard.PowerGuard.start'),patch('power_guard.PowerGuard.stop'):
+  from linkradar.ui import desktop
+  with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),patch('linkradar.system.power_guard.PowerGuard.start'),patch('linkradar.system.power_guard.PowerGuard.stop'):
    w=desktop.Window(Path(folder),service_folder=False);w.timer.stop();begun=threading.Event();release=threading.Event();copied=[]
    def report(*args):begun.set();release.wait(2);return 'Synthetic report'
    class Clipboard:

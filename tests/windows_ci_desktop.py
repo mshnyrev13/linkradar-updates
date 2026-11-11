@@ -61,7 +61,7 @@ def configure_display():
 
 
 def qt_diagnostics():
-    import desktop
+    from linkradar.ui import desktop
     from qt_support import managed_window,settle_layout
     app=desktop.QApplication.instance() or desktop.QApplication([])
     app.setStyle('Fusion');app.setStyleSheet(desktop.STYLE)

@@ -38,8 +38,10 @@ jobs:
           match = re.fullmatch(r'v?(\d{1,6}\.\d{1,6}\.\d{1,6})', release['tag_name'])
           assert match and not release['draft'] and not release['prerelease']
           version = match[1]
-          expected = {f'LinkRadar-{version}-macOS-arm64.dmg', f'LinkRadar-{version}-Windows-x64.zip', 'SHA256SUMS.txt'}
-          assert expected <= {asset['name'] for asset in release['assets'] if asset['state'] == 'uploaded'}
+          assets = {asset['name'] for asset in release['assets'] if asset['state'] == 'uploaded'}
+          common = {f'LinkRadar-{version}-macOS-arm64.dmg', 'SHA256SUMS.txt'}
+          windows = {f'LinkRadar-{version}-Windows-x64-Setup.exe', f'LinkRadar-{version}-Windows-x64.zip'}
+          assert common <= assets and windows & assets, 'Release packages or checksums are missing'
           link = 'https://github.com/' + repo + '/releases/tag/' + release['tag_name']
           assert release['html_url'] == link
           content = json.dumps({'version': version, 'download_url': link}, indent=2) + '\n'

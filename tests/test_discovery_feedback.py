@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock,patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-import network_info as n
+from linkradar.network import network_info as n
 from test_network_info import frame
 
 
@@ -154,7 +154,7 @@ class DiscoveryControls(unittest.TestCase):
         cls.app=production_application(cls)
 
     def test_refresh_requests_only_discovery_and_compact_window_fits(self):
-        import desktop
+        from linkradar.ui import desktop
         from qt_support import managed_window,settle_layout
         with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),managed_window(desktop.Window(Path(folder),service_folder=False)) as window:
             for width,height in ((900,640),(1100,760)):

@@ -2,7 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from server import smooth_jitter
+from linkradar.core.server import smooth_jitter
 
 class JitterTests(unittest.TestCase):
     def points(self, values):
