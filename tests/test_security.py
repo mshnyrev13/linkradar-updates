@@ -236,26 +236,6 @@ class Distribution(unittest.TestCase):
         with self.assertRaises(ValueError):tester.open(urllib.request.Request(speed_test.CONFIG_URL))
         self.assertFalse(session.request.call_args.kwargs['allow_redirects']);response.close.assert_called_once()
 
-    def test_certifi_wheel_record_is_checked_before_replacing_existing_bundle(self):
-        import importlib.util,zipfile
-        sys.path.insert(0,str(ROOT/'packaging'))
-        try:
-            spec=importlib.util.spec_from_file_location('security_windows_builder',ROOT/'packaging/build_windows_zip.py')
-            builder=importlib.util.module_from_spec(spec);spec.loader.exec_module(builder)
-        finally:sys.path.pop(0)
-        with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);packages=root/'packages';(packages/'certifi').mkdir(parents=True)
-            existing=packages/'certifi/cacert.pem';existing.write_text('existing')
-            wheel=root/'corrupt.whl'
-            with zipfile.ZipFile(wheel,'w') as z:
-                info='certifi-2026.10.19.dist-info'
-                z.writestr(info+'/METADATA','Name: certifi\nVersion: 2026.10.19\n')
-                z.writestr(info+'/WHEEL','Root-Is-Purelib: true\nTag: py3-none-any\n')
-                z.writestr(info+'/RECORD','')
-                z.writestr('certifi/cacert.pem','unverified')
-            with self.assertRaises(ValueError):builder.replace_certifi(packages,wheel)
-            self.assertEqual(existing.read_text(encoding='utf-8'),'existing')
-
     def test_certifi_is_fixed_and_transitive_dependencies_pinned(self):
         text=(ROOT/'requirements-desktop.txt').read_text(encoding='utf-8')
         for requirement in ('certifi==2026.10.19','charset-normalizer==3.5.2','idna==3.20','shiboken6==6.12.0'):

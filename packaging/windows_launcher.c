@@ -1,41 +1,54 @@
 #define UNICODE
 #define _UNICODE
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <wchar.h>
 
-DWORD _tls_index;
-static wchar_t root[32768], python[32768], script[32768], data[32768], command[32768];
-static STARTUPINFOW startup;
-static PROCESS_INFORMATION process;
-static BOOL append(wchar_t *dst, const wchar_t *src) {
-    unsigned int n=0;
-    while(dst[n]) n++;
-    while(*src) { if(n>=32767) return FALSE; dst[n++]=*src++; }
-    dst[n]=0;
-    return TRUE;
+enum { PATH_CAPACITY = 32768 };
+static wchar_t root[PATH_CAPACITY], python[PATH_CAPACITY], script[PATH_CAPACITY];
+static wchar_t command[PATH_CAPACITY];
+
+static int launch_error(const wchar_t *message) {
+    MessageBoxW(NULL, message, L"LinkRadar", MB_OK | MB_ICONERROR);
+    return 1;
 }
-static DWORD launch(void) {
-    if (!GetModuleFileNameW(NULL,root,32768)) return 1;
-    wchar_t *slash=NULL;
-    for(wchar_t *p=root;*p;p++) if(*p==L'\\') slash=p;
-    if(!slash) return 1;
-    *slash=0;
-    if(!append(python,root)||!append(python,L"\\runtime\\pythonw.exe")||
-       !append(script,root)||!append(script,L"\\app\\desktop.py")) return 1;
-    if(GetFileAttributesW(python)==INVALID_FILE_ATTRIBUTES||GetFileAttributesW(script)==INVALID_FILE_ATTRIBUTES) {
-        MessageBoxW(NULL,L"Extract the entire ZIP before launching the application.",L"LinkRadar",MB_ICONERROR);
-        return 1;
+
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR arguments, int show) {
+    (void)instance;
+    (void)previous;
+    (void)show;
+
+    DWORD length = GetModuleFileNameW(NULL, root, PATH_CAPACITY);
+    if (!length || length == PATH_CAPACITY) {
+        return launch_error(L"Unable to locate LinkRadar.");
     }
-    if(!append(command,L"\"")||!append(command,python)||!append(command,L"\" \"")||
-       !append(command,script)||!append(command,L"\"")) return 1;
-    startup.cb=sizeof(startup);
-    if(!CreateProcessW(python,command,NULL,NULL,FALSE,CREATE_NO_WINDOW,NULL,root,&startup,&process)) {
-        MessageBoxW(NULL,L"Unable to launch LinkRadar.",L"LinkRadar",MB_ICONERROR);
-        return 1;
+    wchar_t *separator = wcsrchr(root, L'\\');
+    if (!separator) {
+        return launch_error(L"Unable to locate the installation directory.");
+    }
+    *separator = L'\0';
+    if (swprintf_s(python, PATH_CAPACITY, L"%ls\\runtime\\pythonw.exe", root) < 0 ||
+        swprintf_s(script, PATH_CAPACITY, L"%ls\\app\\desktop.py", root) < 0 ||
+        GetFileAttributesW(python) == INVALID_FILE_ATTRIBUTES ||
+        GetFileAttributesW(script) == INVALID_FILE_ATTRIBUTES) {
+        return launch_error(L"The LinkRadar installation is incomplete. Run LinkRadar Setup again.");
+    }
+    if (swprintf_s(command, PATH_CAPACITY, L"\"%ls\" -B \"%ls\" %ls", python, script, arguments) < 0) {
+        return launch_error(L"Unable to start LinkRadar: command line too long.");
+    }
+
+    STARTUPINFOW startup = {0};
+    PROCESS_INFORMATION process = {0};
+    startup.cb = sizeof(startup);
+    if (!CreateProcessW(python, command, NULL, NULL, FALSE, CREATE_NO_WINDOW,
+                        NULL, root, &startup, &process)) {
+        return launch_error(L"Unable to start LinkRadar.");
     }
     CloseHandle(process.hThread);
-    WaitForSingleObject(process.hProcess,INFINITE);
-    DWORD exitcode=0;GetExitCodeProcess(process.hProcess,&exitcode);
+    DWORD exit_code = 1;
+    if (WaitForSingleObject(process.hProcess, INFINITE) == WAIT_OBJECT_0) {
+        GetExitCodeProcess(process.hProcess, &exit_code);
+    }
     CloseHandle(process.hProcess);
-    return exitcode;
+    return (int)exit_code;
 }
-void WINAPI entry(void) { ExitProcess(launch()); }
