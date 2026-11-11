@@ -60,5 +60,5 @@
   потерю транзитного трафика. Тест скорости и DNS используют маршрут ОС.
   Физический сон/выключение останавливают сетевые пробы.
 
-Подробности: [README.md](README.md), [VALIDATION.md](VALIDATION.md),
-[CHECKLIST-2.9.1.md](CHECKLIST-2.9.1.md), [MEMORY.md](MEMORY.md).
+Подробности: [README.md](../../../README.md), [VALIDATION.md](../validation/VALIDATION.md),
+[CHECKLIST-2.9.1.md](../validation/CHECKLIST-2.9.1.md), [MEMORY.md](../../../MEMORY.md).

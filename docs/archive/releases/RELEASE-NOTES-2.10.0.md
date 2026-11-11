@@ -35,8 +35,8 @@
 - Добавлены исходные хеши сборки и проверки CI для macOS/Windows. Добавление
   workflow не означает, что он уже выполнялся на Windows.
 
-Замеры, проверка сборки и ограничения — [VALIDATION.md](VALIDATION.md).
-Ход нескольких циклов — [STABILITY-WORKLOG.md](STABILITY-WORKLOG.md).
+Замеры, проверка сборки и ограничения — [VALIDATION.md](../validation/VALIDATION.md).
+Ход нескольких циклов — [STABILITY-WORKLOG.md](../audits/STABILITY-REPORT.md).
 
 macOS: Apple Silicon, macOS 15+, ad hoc подпись без Developer ID/нотаризации.
 Windows: нужен Npcap для захвата/LLDP; исполнение новой версии на Windows и

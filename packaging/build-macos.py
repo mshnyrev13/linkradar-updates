@@ -54,20 +54,11 @@ def main():
     documentation = app / 'Contents/Resources/Documentation'
     documentation.mkdir(parents=True, exist_ok=True)
     build_manifest.save(root,documentation/'BUILD-MANIFEST.json',VERSION,platform='macOS-arm64',minimum_macos='15.0',signing='ad-hoc',runtime_ca_policy_sha256=build_manifest.digest(ca_policy) if ca_policy.is_file() else None)
-    for source, name in [('RELEASE-NOTES-2.10.12.md', 'RELEASE-NOTES-2.10.12.md'), ('RELEASE-NOTES-2.10.11.md', 'RELEASE-NOTES-2.10.11.md'), ('RELEASE-NOTES-2.10.10.md', 'RELEASE-NOTES-2.10.10.md'), ('README-macOS.md', 'README.md'),
-                         ('STANDALONE.md', 'STANDALONE.md'), ('STREAM.md', 'STREAM.md'),
-                         ('SECURITY-AUDIT.md','SECURITY-AUDIT.md'),
-                         ('SPEED-AUDIT.md','SPEED-AUDIT.md'),
-                         ('AUDIT-2.10.3.md','AUDIT-2.10.3.md'),
-                         ('AUDIT-2.10.4.md','AUDIT-2.10.4.md'),
-                         ('AUDIT-2.10.5.md','AUDIT-2.10.5.md'),
-                         ('AUDIT-2.10.7.md','AUDIT-2.10.7.md'),
-                         ('AUDIT-2.10.8.md','AUDIT-2.10.8.md'),
-                         ('AUDIT-2.10.9.md','AUDIT-2.10.9.md'),
-                         ('RELEASE-NOTES-2.10.9.md','RELEASE-NOTES-2.10.9.md'),
-                         ('RELEASE-NOTES-2.10.8.md','RELEASE-NOTES-2.10.8.md'),
-                         ('RELEASE-NOTES-2.10.7.md','RELEASE-NOTES-2.10.7.md'),
-                         ('UPDATES.md','UPDATES.md'), ('RELEASE-NOTES-2.10.6.md','RELEASE-NOTES-2.10.6.md')]:
+    for source, name in (
+        ('docs/macos.md', 'README.md'),
+        ('docs/standalone.md', 'standalone.md'),
+        ('docs/stream.md', 'stream.md'),
+    ):
         shutil.copy2(root / source, documentation / name)
     subprocess.run(['/usr/bin/codesign', '--force', '--deep', '--sign', '-', str(app)], check=True)
     subprocess.run(['/usr/bin/codesign', '--verify', '--deep', '--strict', str(app)], check=True)

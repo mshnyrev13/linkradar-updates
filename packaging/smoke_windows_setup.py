@@ -15,7 +15,8 @@ def run(executable, *args, cwd, env, timeout=120):
 def smoke(setup, work):
     app = work / "LinkRadar тест"
     report = work / "smoke result.json"
-    env = os.environ | {
+    env = os.environ.copy()
+    launch_env = env | {
         "TEMP": str(work),
         "TMP": str(work),
         "TMPDIR": str(work),
@@ -29,11 +30,13 @@ def smoke(setup, work):
 
     try:
         run(setup, *install_options, cwd=work, env=env)
-        run(launcher, "--smoke-test", "--no-discovery", "--smoke-report", report, cwd=work, env=env, timeout=35)
+        run(launcher, "--smoke-test", "--no-discovery", "--smoke-report", report, cwd=work, env=launch_env, timeout=35)
         result = json.loads(report.read_text(encoding="utf-8"))
         manifest = json.loads((app / "BUILD-MANIFEST.json").read_text(encoding="utf-8"))
-        if result["version"] != manifest["version"] or not result["targets"] or not (work / "window.png").is_file():
+        successful_probes = sum(target["window_stats"]["ok"] for target in result["targets"])
+        if result["version"] != manifest["version"] or not successful_probes or not (work / "window.png").is_file():
             raise RuntimeError("Installed launcher did not produce a native LinkRadar measurement")
+        print(f"Native LinkRadar {result['version']}: {successful_probes} successful loopback probes")
         if Path(result["profile"]).parent != work:
             raise RuntimeError("Smoke profile was created outside the temporary workspace")
         run(setup, *install_options, cwd=work, env=env)

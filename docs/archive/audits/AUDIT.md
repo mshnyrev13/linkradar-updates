@@ -10,14 +10,14 @@
 
 ## Высокий приоритет
 
-1. **Исправлено** (тот же день, `tests/test_worker_resilience.py`). **Поток измерений умирал молча** — [server.py:688](server.py:688) `worker`, [server.py:616](server.py:616) `route_worker`. Перехватываются только `OSError`/`SubprocessError` и ошибки внутри `probe()`. Любая другая ошибка (например, `sqlite3.OperationalError` при заполненном диске или «database is locked») завершает поток. Проверено: после `KeyError` на третьей пробе поток мёртв, сессия `running`, `sid` активен, в событиях только «Проверка запущена». В интерфейсе остаётся LIVE, графики просто останавливаются.
+1. **Исправлено** (тот же день, `tests/test_worker_resilience.py`). **Поток измерений умирал молча** — [server.py:688](../../../server.py#L688) `worker`, [server.py:616](../../../server.py#L616) `route_worker`. Перехватываются только `OSError`/`SubprocessError` и ошибки внутри `probe()`. Любая другая ошибка (например, `sqlite3.OperationalError` при заполненном диске или «database is locked») завершает поток. Проверено: после `KeyError` на третьей пробе поток мёртв, сессия `running`, `sid` активен, в событиях только «Проверка запущена». В интерфейсе остаётся LIVE, графики просто останавливаются.
    Сделано: тело цикла в `try/except Exception` — одно событие на серию сбоев, повтор на следующем такте, событие о восстановлении; ошибка, вырвавшаяся из функции потока, записывается событием; `timer` каждые 5 с перезапускает досрочно завершившийся поток (до 3 раз).
 
 2. **Исправлено** (тот же день, `error_log.py`, `tests/test_error_log.py`; политика — STANDALONE.md). **Диагностика терялась**:
-   - фоновый движок Windows запускается через `pythonw.exe` от SYSTEM ([install-background-windows.ps1:28](packaging/install-background-windows.ps1:28)) — `stderr` отсутствует, трассировки и `threading.excepthook` ничего не сохраняют;
+   - фоновый движок Windows запускается через `pythonw.exe` от SYSTEM ([install-background-windows.ps1:28](../../../packaging/install-background-windows.ps1#L28)) — `stderr` отсутствует, трассировки и `threading.excepthook` ничего не сохраняют;
    - собранное приложение (`--windowed`) — то же для GUI: исключения в слотах Qt и в `QThread.run` (например, `Discovery.run` без `try`) не видны; `sys.excepthook`/`threading.excepthook` не установлены;
-   - macOS: `service-out.log`/`service-error.log` обнуляются при каждом закрытии окна ([server.py:395](server.py:395)) — после сбоя и перезапуска причины нет;
-   - ошибки сводятся к общему тексту: [stream_monitor.py:89](stream_monitor.py:89) (только имя класса), [network_info.py:266](network_info.py:266), [network_info.py:279](network_info.py:279), [traffic_capture.py:176](traffic_capture.py:176), `SpeedWorker` ([desktop.py:67](desktop.py:67)), [stream_widgets.py:211](stream_widgets.py:211), код Windows ICMP теряется в `probe()` («Сетевая или локальная ошибка ОС»), `stderr` dumpcap читается и выбрасывается ([packet_tools.py:160](packet_tools.py:160)).
+   - macOS: `service-out.log`/`service-error.log` обнуляются при каждом закрытии окна ([server.py:395](../../../server.py#L395)) — после сбоя и перезапуска причины нет;
+   - ошибки сводятся к общему тексту: [stream_monitor.py:89](../../../stream_monitor.py#L89) (только имя класса), [network_info.py:266](../../../network_info.py#L266), [network_info.py:279](../../../network_info.py#L279), [traffic_capture.py:176](../../../traffic_capture.py#L176), `SpeedWorker` ([desktop.py:67](../../../desktop.py#L67)), [stream_widgets.py:211](../../../stream_widgets.py#L211), код Windows ICMP теряется в `probe()` («Сетевая или локальная ошибка ОС»), `stderr` dumpcap читается и выбрасывается ([packet_tools.py:160](../../../packet_tools.py#L160)).
 
    Сделано: `error_log.py` — журнал по типу процесса (`errors.log`, `errors-service.log`, `errors-web.log`), 512 КБ + 1 копия, записи старше 12 ч удаляются, секреты маскируются до записи, журнал переживает обычное закрытие. `sys.excepthook`, `threading.excepthook`, `sys.unraisablehook`, `faulthandler` (`crash*.log`), Qt critical/fatal. Перечисленные места пишут в журнал; HTTP-обработчик веб-режима отвечает 500 и пишет трассировку (часть п. 7). Кнопка «Журнал ошибок» в окне.
 
@@ -34,35 +34,35 @@
 
 ## Средний приоритет
 
-4. **Запись в БД из GUI-потока**: `store.prune()` каждые 500 мс в `refresh` ([desktop.py:566](desktop.py:566)), `executemany` Graphene ([desktop.py:544](desktop.py:544)). При фоновой службе два процесса пишут в одну SQLite: возможны подвисания UI и «database is locked» (по умолчанию ожидание 5 с) — в GUI это исключение в слоте (см. п. 2), в службе — п. 1.
-5. **Полный список событий в каждом снимке**: `event_limit=None` ([desktop.py:49](desktop.py:49), [background_engine.py:86](background_engine.py:86)). Каждые 0,5–2 с через IPC и JSON уходят все события сессии за 12 часов; при частых сбоях объём растёт линейно.
-6. **Закрытие окна может зависнуть**: `discovery.wait()` и `speed_worker.wait()` без таймаута ([desktop.py:631](desktop.py:631)). Ограничено таймаутами PowerShell (6 с) и HTTP (4 с), но UI в это время не отвечает.
-7. **Прежний веб-сервер** ([server.py:1014](server.py:1014), [server.py:1057](server.py:1057)) ловит только `ValueError`/`TypeError`. `sqlite3`-ошибки, `KeyError` в `csv_export`, `FileNotFoundError` рвут соединение без ответа; `log_message` отключён. Загруженные/захваченные PCAP в `data/captures` никогда не удаляются.
+4. **Запись в БД из GUI-потока**: `store.prune()` каждые 500 мс в `refresh` ([desktop.py:566](../../../desktop.py#L566)), `executemany` Graphene ([desktop.py:544](../../../desktop.py#L544)). При фоновой службе два процесса пишут в одну SQLite: возможны подвисания UI и «database is locked» (по умолчанию ожидание 5 с) — в GUI это исключение в слоте (см. п. 2), в службе — п. 1.
+5. **Полный список событий в каждом снимке**: `event_limit=None` ([desktop.py:49](../../../desktop.py#L49), [background_engine.py:86](../../../background_engine.py#L86)). Каждые 0,5–2 с через IPC и JSON уходят все события сессии за 12 часов; при частых сбоях объём растёт линейно.
+6. **Закрытие окна может зависнуть**: `discovery.wait()` и `speed_worker.wait()` без таймаута ([desktop.py:631](../../../desktop.py#L631)). Ограничено таймаутами PowerShell (6 с) и HTTP (4 с), но UI в это время не отвечает.
+7. **Прежний веб-сервер** ([server.py:1014](../../../server.py#L1014), [server.py:1057](../../../server.py#L1057)) ловит только `ValueError`/`TypeError`. `sqlite3`-ошибки, `KeyError` в `csv_export`, `FileNotFoundError` рвут соединение без ответа; `log_message` отключён. Загруженные/захваченные PCAP в `data/captures` никогда не удаляются.
 
 ## Хардкод
 
 | Где | Что | Замечание |
 | --- | --- | --- |
-| [graphene_port.py:12](graphene_port.py:12) | `https://graphene.yandex-team.ru`, project `noc`, table `network`, суффиксы `.yndx.net/.yandex.net/.yandex-team.ru` | корпоративный сервис; вынести в настройки |
-| [speed_test.py:18](speed_test.py:18) | `yandex.ru/internet/api/v0/get-probes`, белый список `*.cdn.yandex.net` | единственный провайдер теста скорости |
-| [speed_test.py:75](speed_test.py:75) | `User-Agent: VCS-Network-Watch/2.0` | версия не совпадает с `server.VERSION` 2.8.1 |
-| [desktop.py:243](desktop.py:243) | серверы по умолчанию `src-ugc.strm.yandex.net`, `ya.ru`, `google.com` | — |
-| [desktop.py:682](desktop.py:682) | `switch-a.example.test` / `Gi1/0/17` в smoke-тесте | внутреннее имя коммутатора в коде |
-| [desktop.py:684](desktop.py:684) | `/private/tmp/...png` | путь macOS; на Windows скриншот не сохраняется |
-| [desktop.py:648](desktop.py:648) | папка данных: не-Windows → `~/Library/Application Support` | на Linux неверно (Linux не поддерживается) |
-| [packet_tools.py:20](packet_tools.py:20), [network_info.py:190](network_info.py:190) | `C:/Program Files/Wireshark`, `System32/Npcap`, `/usr/lib/libpcap.A.dylib` | стандартные пути; нестандартная установка не найдётся |
-| [mac_background.py:10](mac_background.py:10) | `/Applications/VCS Network Watch.app` | автоустановка службы только из Applications (намеренно) |
-| [server.py:33](server.py:33), [traffic_capture.py:13](traffic_capture.py:13) | 12 ч хранения, 120 с пакетов, 50 000 пакетов / 32 МБ | требования проекта (AGENTS.md) — не менять |
-| [server.py:1063](server.py:1063), [stream_sources.py:23](stream_sources.py:23) | порт 8765, obs-websocket 4455, vMix `127.0.0.1:8088` | переопределяются аргументом/полем UI |
-| [desktop.py:70](desktop.py:70), [desktop.py:127](desktop.py:127) | пороги цвета RTT 100/200, jitter 10/35 мс | дублируются в двух местах |
+| [graphene_port.py:12](../../../graphene_port.py#L12) | `https://graphene.yandex-team.ru`, project `noc`, table `network`, суффиксы `.yndx.net/.yandex.net/.yandex-team.ru` | корпоративный сервис; вынести в настройки |
+| [speed_test.py:18](../../../speed_test.py#L18) | `yandex.ru/internet/api/v0/get-probes`, белый список `*.cdn.yandex.net` | единственный провайдер теста скорости |
+| [speed_test.py:75](../../../speed_test.py#L75) | `User-Agent: VCS-Network-Watch/2.0` | версия не совпадает с `server.VERSION` 2.8.1 |
+| [desktop.py:243](../../../desktop.py#L243) | серверы по умолчанию `src-ugc.strm.yandex.net`, `ya.ru`, `google.com` | — |
+| [desktop.py:682](../../../desktop.py#L682) | `switch-a.example.test` / `Gi1/0/17` в smoke-тесте | внутреннее имя коммутатора в коде |
+| [desktop.py:684](../../../desktop.py#L684) | `/private/tmp/...png` | путь macOS; на Windows скриншот не сохраняется |
+| [desktop.py:648](../../../desktop.py#L648) | папка данных: не-Windows → `~/Library/Application Support` | на Linux неверно (Linux не поддерживается) |
+| [packet_tools.py:20](../../../packet_tools.py#L20), [network_info.py:190](../../../network_info.py#L190) | `C:/Program Files/Wireshark`, `System32/Npcap`, `/usr/lib/libpcap.A.dylib` | стандартные пути; нестандартная установка не найдётся |
+| [mac_background.py:10](../../../mac_background.py#L10) | `/Applications/VCS Network Watch.app` | автоустановка службы только из Applications (намеренно) |
+| [server.py:33](../../../server.py#L33), [traffic_capture.py:13](../../../traffic_capture.py#L13) | 12 ч хранения, 120 с пакетов, 50 000 пакетов / 32 МБ | требования проекта (AGENTS.md) — не менять |
+| [server.py:1063](../../../server.py#L1063), [stream_sources.py:23](../../../stream_sources.py#L23) | порт 8765, obs-websocket 4455, vMix `127.0.0.1:8088` | переопределяются аргументом/полем UI |
+| [desktop.py:70](../../../desktop.py#L70), [desktop.py:127](../../../desktop.py#L127) | пороги цвета RTT 100/200, jitter 10/35 мс | дублируются в двух местах |
 
 ## Низкий приоритет
 
-8. Lock-файлы растут на 1 байт при каждом запуске: `open('a+b')` + `write(b'0')` всегда дописывает в конец ([desktop.py:659](desktop.py:659), [background_engine.py:50](background_engine.py:50)). Проверено: 3 открытия → 3 байта. В `server.py` это уже учтено.
-9. `--data-dir` последним аргументом без значения → `IndexError` ([desktop.py:650](desktop.py:650)).
-10. Мёртвый код: `self.context`, `self.opener` в `SpeedTest` не используются ([speed_test.py:65](speed_test.py:65)).
-11. Защита CSV от формул не учитывает ведущие `\t` и `\r` ([server.py:912](server.py:912)).
-12. Ответ Graphene читается целиком до проверки размера 20 МБ ([graphene_port.py:128](graphene_port.py:128)).
+8. Lock-файлы растут на 1 байт при каждом запуске: `open('a+b')` + `write(b'0')` всегда дописывает в конец ([desktop.py:659](../../../desktop.py#L659), [background_engine.py:50](../../../background_engine.py#L50)). Проверено: 3 открытия → 3 байта. В `server.py` это уже учтено.
+9. `--data-dir` последним аргументом без значения → `IndexError` ([desktop.py:650](../../../desktop.py#L650)).
+10. Мёртвый код: `self.context`, `self.opener` в `SpeedTest` не используются ([speed_test.py:65](../../../speed_test.py#L65)).
+11. Защита CSV от формул не учитывает ведущие `\t` и `\r` ([server.py:912](../../../server.py#L912)).
+12. Ответ Graphene читается целиком до проверки размера 20 МБ ([graphene_port.py:128](../../../graphene_port.py#L128)).
 13. Windows `network_info` запускает PowerShell каждые 10 с (заметная нагрузка CPU на слабых ПК).
 
 ## Что уже хорошо

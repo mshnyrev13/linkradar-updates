@@ -37,7 +37,7 @@
 
 ## Проверки
 
-259 unit/integration-тестов: ошибок нет, 11 платформенных пропусков. Дополнительно 5 HTTP integration и 2 JavaScript-сценария, OK. Включены настоящий локальный HTTP/IPC, фикстуры OBS/vMix, отказ/обрыв экспорта, гонки pause/restart/clear, смена IP/NIC и IPv6 scope. Финальный Finder на публичных целях прошёл 7 этапов управления/экспорта и 80/80 ответов с завершённым 8-hop маршрутом; private packaged engine восстановился после SIGKILL с сохранением 5 проб и паузы, Finder через IPC получил 24 ответа шлюза. Проверены manifest/bytecode 31 модуля Mac, исходники 31 модуля Windows, CRC и зависимости; Windows не исполнялась. Полные результаты — [VALIDATION.md](VALIDATION.md). Машинные сводки — [stability-results.json](https://github.com/mshnyrev13/vcs-network-watch).
+259 unit/integration-тестов: ошибок нет, 11 платформенных пропусков. Дополнительно 5 HTTP integration и 2 JavaScript-сценария, OK. Включены настоящий локальный HTTP/IPC, фикстуры OBS/vMix, отказ/обрыв экспорта, гонки pause/restart/clear, смена IP/NIC и IPv6 scope. Финальный Finder на публичных целях прошёл 7 этапов управления/экспорта и 80/80 ответов с завершённым 8-hop маршрутом; private packaged engine восстановился после SIGKILL с сохранением 5 проб и паузы, Finder через IPC получил 24 ответа шлюза. Проверены manifest/bytecode 31 модуля Mac, исходники 31 модуля Windows, CRC и зависимости; Windows не исполнялась. Полные результаты — [VALIDATION.md](../validation/VALIDATION.md). Машинные сводки — [stability-results.json](https://github.com/mshnyrev13/vcs-network-watch).
 
 Системный ping до того же публичного IP в следующем замере: 12/12, median 9,9865 мс, max 87,574 мс. Это последовательная reference-проверка, не синхронное сравнение RTT и не проверка запущенного PingPlotter.
 
