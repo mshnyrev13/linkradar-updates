@@ -19,6 +19,8 @@ class Timeline(QWidget):
         self.scroll.valueChanged.connect(self.seek)
         row.addWidget(self.scroll, 1)
         self.live = QToolButton(); self.live.setText('Сейчас')
+        self.setFixedHeight(22);self.scroll.setFixedHeight(18);self.live.setFixedHeight(22)
+        self.live.setStyleSheet('QToolButton{padding:0 6px;}')
         self.live.setAccessibleName('Вернуться к текущим измерениям')
         self.live.clicked.connect(self.follow); row.addWidget(self.live)
 

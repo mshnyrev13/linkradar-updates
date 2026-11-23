@@ -20,6 +20,7 @@ class Navigation(unittest.TestCase):
 
     def test_history_stays_fixed_while_live_advances_and_can_resume(self):
         bar=Timeline();bar.set_bounds(100,1100,60)
+        self.assertEqual(bar.minimumHeight(),22);self.assertEqual(bar.maximumHeight(),22)
         bar.scroll.setValue(300);self.assertEqual(bar.focus_end,460)
         bar.set_bounds(100,1200,60);self.assertEqual(bar.focus_end,460)
         QTest.mouseClick(bar.live,Qt.MouseButton.LeftButton)
