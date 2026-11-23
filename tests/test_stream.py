@@ -251,6 +251,16 @@ def obs_data(seconds,bytes_,skipped,active=True,reconnecting=False,congestion=.0
             'service':{'type':'rtmp_custom','server':'rtmp://ingest.example.net','protocol':'RTMP'},'outputs':[]}
 
 class Monitor(unittest.TestCase):
+    def test_vmix_overview_explicit_srt_disconnect_and_recovery(self):
+        monitor=stream_monitor.StreamMonitor()
+        row=lambda video:sources.parse_vmix_rows([],[['SRT Out1','0','0','0','0',video,'']])
+        monitor.update_vmix_rows(100,row('Connected 192.0.2.1:10000'))
+        monitor.update_vmix_rows(101,row('Disconnected'))
+        stream=monitor.streams['vmix:stat:SRT Out1']
+        self.assertEqual(stream['state'],'disconnected');self.assertFalse(stream['active'])
+        self.assertIsNone(stream['dropped_rate']);self.assertEqual(stream['target'],'')
+        monitor.update_vmix_rows(102,row('Connected 192.0.2.1:10000'))
+        self.assertEqual(stream['state'],'connected');self.assertTrue(stream['active'])
     def test_open_empty_statistics_table_is_not_a_closed_window(self):
         monitor=stream_monitor.StreamMonitor()
         with patch.object(sources,'vmix_statistics',return_value=[]),patch.object(monitor,'fetch',side_effect=lambda name,fn,*args:fn()):

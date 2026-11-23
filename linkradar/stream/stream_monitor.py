@@ -21,7 +21,7 @@ LIMITS={'drop_pct':(.1,1),'congestion':(.1,.5),'rtt':(150,300),'retrans_pct':(1,
 SECTIONS=('obs','vmix_api','vmix_stats','vmix_log','tcp','ndi')
 UNSET=object()
 CLOSED=object()
-STATE_TEXT={'live':'в эфире','reconnecting':'переподключение','connected':'подключено','found':'обнаружен','off':'остановлен','lost':'пропал'}
+STATE_TEXT={'live':'в эфире','reconnecting':'переподключение','connected':'подключено','disconnected':'нет соединения','found':'обнаружен','off':'остановлен','lost':'пропал'}
 
 def level(metric,value):
     if value is None:return 0
@@ -321,9 +321,10 @@ class StreamMonitor:
                             note=' · '.join(p for p in ('потери пакетов '+f'{loss:g} %' if loss is not None else '','длительность '+row['duration'] if row.get('duration') else '') if p))
             elif row['kind'] in ('srt_input','srt_output','output','ndi'):
                 key='vmix:stat:'+row['name'];seen.add(key)
+                disconnected=row['kind'] in ('srt_input','srt_output') and row.get('video','').strip().casefold().startswith('disconnected')
                 self.stream(key,now,label='vMix · '+row['name'],source='vMix Statistics',protocol={'srt_input':'SRT вход','srt_output':'SRT выход','output':'Выход','ndi':'NDI'}[row['kind']],
-                            target=row.get('endpoint',''),state='connected',active=True,dropped_delta=lost,
-                            dropped_rate=lost/seconds if lost is not None and seconds>0 else None,
+                            target=row.get('endpoint',''),state='disconnected' if disconnected else 'connected',active=not disconnected,dropped_delta=None if disconnected else lost,
+                            dropped_rate=lost/seconds if not disconnected and lost is not None and seconds>0 else None,
                             frames_dropped=sum(row.get(k) or 0 for k in ('source_dropped','renderer_dropped','fullscreen_dropped')),latency=row.get('latency_ms'),
                             note=('аудиобуфер '+str(row['audio_buffer_ms'])+' мс' if row.get('audio_buffer_ms') is not None else ''))
         return seen

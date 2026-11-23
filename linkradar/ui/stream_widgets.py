@@ -19,7 +19,7 @@ from linkradar.ui.ui_tasks import Call
 
 PERIODS=[(60,'1 мин'),(300,'5 мин'),(900,'15 мин'),(1800,'30 мин'),(3600,'1 час'),(10800,'3 часа'),(43200,'12 часов')]
 STATES={'live':('В ЭФИРЕ','#22c55e'),'reconnecting':('ПЕРЕПОДКЛЮЧЕНИЕ','#ef6275'),'connected':('подключено','#60a5fa'),'found':('обнаружен','#91a2bb'),
-        'off':('остановлен','#91a2bb'),'lost':('пропал','#f59e0b')}
+        'off':('остановлен','#91a2bb'),'lost':('пропал','#f59e0b'),'disconnected':('нет соединения','#f59e0b')}
 LEVEL_COLORS=('#dce6f4','#f4cd35','#ef6275')
 COLUMNS=['Источник','Протокол','Назначение','Состояние','В эфире','Битрейт','FPS','Потеряно','Потери/с','Буфер','RTT','Повторы, %','Примечание']
 COLUMN_TIPS=['','','Сервер приёма без ключа или адрес соединения','','Длительность эфира','Битрейт, кбит/с','Кадров в секунду',
@@ -36,6 +36,7 @@ def fmt(value,digits=0):return engine.fmt(value,digits)
 def missing_metric_message(stream,status,keys,remote_vmix=False):
     """Explain missing source data, without turning absence into zero or loss."""
     if not stream:return 'Выберите поток в таблице'
+    if stream.get('state')=='disconnected':return 'vMix сообщает: нет соединения SRT'
     if stream.get('state') in ('off','lost'):return 'Нет свежих данных: поток остановлен или источник недоступен'
     key=stream['key']
     if key.startswith('vmix:encoder:'):
