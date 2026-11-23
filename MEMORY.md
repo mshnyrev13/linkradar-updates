@@ -27,7 +27,7 @@ TCP-битрейт обновляется при каждом опросе и о
 Повтор одной строки не создаёт новые точки; один канал может служить fallback
 локальной трансляции API. Несколько каналов и удалённый API не смешиваются.
 
-Проверка: Windows/Python 3.11.4/Qt 6.12, 439 unit (32 skipped), 6 integration
+Проверка: Windows/Python 3.11.4/Qt 6.12, 440 unit (32 skipped), 6 integration
 (1 skipped), оба JS-набора; реальный speedtest и локальный RTMP энкодером vMix,
 нативные окна 900×640 и 1100×760. Подробности: docs/windows-diagnostics.md.
 

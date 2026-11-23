@@ -728,6 +728,8 @@ class Window(QMainWindow):
         if phase!='config':self.speed_readout.setText(('↓ ' if phase=='download' else '↑ ')+fmt(data['mbps'])+' Мбит/с')
     def finish_speed(self):
         self.speed_active=False
+        if self.speed_ping.text()=='Ping: измеряем…':
+            self.speed_ping.setText('Ping: не измерен');self.speed_ping.setToolTip('Тест завершён до получения ICMP-измерения')
         if self.load_windows and self.load_windows[-1][1] is None:self.load_windows[-1][1]=time.time()
         for graph in [self.graph,self.jitter]:graph.invalidate_chart();graph.update()
         self.speed_button.setEnabled(True)

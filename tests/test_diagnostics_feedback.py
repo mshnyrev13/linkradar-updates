@@ -19,7 +19,8 @@ class Navigation(unittest.TestCase):
     def setUpClass(cls):cls.app=production_application(cls)
 
     def test_history_stays_fixed_while_live_advances_and_can_resume(self):
-        bar=Timeline();bar.set_bounds(100,1100,60)
+        bar=Timeline();self.assertEqual(bar.scroll.maximum(),0);self.assertFalse(bar.live.isEnabled())
+        bar.set_bounds(100,1100,60)
         self.assertEqual(bar.minimumHeight(),22);self.assertEqual(bar.maximumHeight(),22)
         bar.scroll.setValue(300);self.assertEqual(bar.focus_end,460)
         bar.set_bounds(100,1200,60);self.assertEqual(bar.focus_end,460)
@@ -46,6 +47,11 @@ class Navigation(unittest.TestCase):
         snap=m.snapshot(300,key='vmix:stream',focus_end=700)
         self.assertEqual([p[0] for p in snap['history']['vmix:stream']],[500,700])
         self.assertEqual(snap['now'],1200);self.assertEqual(snap['chart_end'],700)
+
+    def test_speed_cancel_before_ping_does_not_leave_loading_label(self):
+        with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),managed_window(desktop.Window(Path(folder))) as w:
+            w.speed_ping.setText('Ping: измеряем…');w.finish_speed()
+            self.assertEqual(w.speed_ping.text(),'Ping: не измерен')
 
     @unittest.skipUnless(sys.platform=='win32','Windows policy')
     def test_windows_discovery_does_not_start_hidden_graphene(self):

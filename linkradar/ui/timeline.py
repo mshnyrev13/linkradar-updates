@@ -23,6 +23,7 @@ class Timeline(QWidget):
         self.live.setStyleSheet('QToolButton{padding:0 6px;}')
         self.live.setAccessibleName('Вернуться к текущим измерениям')
         self.live.clicked.connect(self.follow); row.addWidget(self.live)
+        self.set_bounds(0,0,self.period)
 
     def set_bounds(self, begin, end, period):
         self.begin = max(begin, end - 12 * 3600)
