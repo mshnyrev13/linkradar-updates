@@ -230,7 +230,7 @@ def run(folder,stop=None,user_sid=None):
                     elif command=='pause':result=monitor.pause(req['sid'])
                     elif command=='interface':monitor.set_interface(req.get('identity'));result=True
                     elif command=='interval':monitor.set_interval(req['seconds']);result=True
-                    elif command=='snapshot':result=monitor.snapshot(req['sid'],req['window'],event_limit=None,compact=bool(req.get('compact')),selected_node=req.get('selected_node'),event_after=max(0,int(req.get('event_after',0))),cancel=stop)
+                    elif command=='snapshot':result=monitor.snapshot(req['sid'],req['window'],focus_end=req.get('focus_end'),event_limit=None,compact=bool(req.get('compact')),selected_node=req.get('selected_node'),event_after=max(0,int(req.get('event_after',0))),cancel=stop)
                     elif command in ('export','export_stream'):
                         names=req.get('names') or {}
                         if not isinstance(names,dict) or len(names)>10000 or not all(isinstance(k,str) and (v is None or isinstance(v,str)) for k,v in names.items()):raise ValueError('Некорректные имена узлов')

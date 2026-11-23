@@ -384,12 +384,16 @@ class Widgets(unittest.TestCase):
             for table in (panel.table,panel.vmix_table):
                 header=table.horizontalHeader()
                 self.assertTrue(all(header.sectionResizeMode(i)==QHeaderView.ResizeMode.Interactive for i in range(table.columnCount())))
-                self.assertLessEqual(abs(sum(table.columnWidth(i) for i in range(table.columnCount()))-table.viewport().width()),1)
+                fitter=panel.columns if table is panel.table else panel.vmix_columns
+                self.assertLessEqual(abs(sum(table.columnWidth(i) for i in range(table.columnCount()))-max(table.viewport().width(),sum(fitter.minimums))),1)
             before=[panel.table.columnWidth(i) for i in range(3)]
             panel.resize(1500,800);self.app.processEvents()
             after=[panel.table.columnWidth(i) for i in range(3)]
-            self.assertTrue(all(b<a for a,b in zip(after,before)))  # every column grows, not only the last
-            self.assertAlmostEqual(after[2]/after[0],before[2]/before[0],delta=.05)
+            self.assertTrue(all(b<=a for a,b in zip(after,before)))
+            self.assertTrue(any(b<a for a,b in zip(after,before)))
+            # Header minima can pin a column while other columns grow.
+            if all(before[i]>panel.columns.minimums[i] for i in (0,2)):
+                self.assertAlmostEqual(after[2]/after[0],before[2]/before[0],delta=.05)
             panel.table.setColumnWidth(0,400);self.app.processEvents()  # user drag
             panel.resize(1200,800);self.app.processEvents()
             self.assertGreater(panel.table.columnWidth(0),panel.table.columnWidth(2))

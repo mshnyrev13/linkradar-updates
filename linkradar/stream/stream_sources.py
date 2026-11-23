@@ -28,7 +28,7 @@ from urllib3.exceptions import HTTPError as TransportError
 OBS_PORT=4455
 VMIX_API='http://127.0.0.1:8088/api'
 # Processes whose TCP connections are treated as encoder traffic.
-ENCODERS={'obs64.exe':'OBS','obs32.exe':'OBS','obs.exe':'OBS','vmix64.exe':'vMix','vmix.exe':'vMix','ndinode.exe':'vMix','ffmpeg.exe':'FFmpeg'}
+ENCODERS={'obs64.exe':'OBS','obs32.exe':'OBS','obs.exe':'OBS','vmix64.exe':'vMix','vmix.exe':'vMix','ndinode.exe':'vMix','ffmpeg2.exe':'vMix','ffmpeg.exe':'FFmpeg'}
 STREAM_OUTPUTS={'simple_stream','adv_stream'}
 RECORD_OUTPUTS={'simple_file_output','adv_file_output','adv_ffmpeg_output'}
 
@@ -216,6 +216,49 @@ class ObsClient:
 
 # --- vMix ------------------------------------------------------------------------
 
+FFMPEG_PROGRESS=re.compile(r'(?:^|[\r\n])frame=\s*(\d+)\s+fps=\s*(\d+(?:[.,]\d+)?)\s+[^\r\n]*?size=\s*(\d+)\s*(kB|KiB|B)\s+time=(\d+):(\d+):(\d+(?:[.,]\d+)?)\s+bitrate=\s*(\d+(?:[.,]\d+)?)\s*(kbits/s|Mbits/s|bits/s)',re.I)
+
+def parse_vmix_progress(text):
+    """Allowlist numbers only: never return the command line, URL or log text."""
+    matches=list(FFMPEG_PROGRESS.finditer(text))
+    if not matches:return None
+    match=matches[-1]
+    if re.search(r'Conversion failed|Exiting normally|av_interleaved_write_frame\(\).*error',text[match.end():],re.I):return None
+    frame,fps,size,unit,hours,minutes,seconds,bitrate,rate_unit=match.groups()
+    seconds=int(hours)*3600+int(minutes)*60+float(seconds.replace(',','.'))
+    return {'frames':int(frame),'fps':float(fps.replace(',','.')),'bytes':int(size)*(1024 if unit.lower()!='b' else 1),
+            'media_seconds':seconds,'bitrate':float(bitrate.replace(',','.'))*{'kbits/s':1,'mbits/s':1000,'bits/s':.001}[rate_unit.lower()]}
+
+def vmix_encoder_logs(folder=None,now=None):
+    """Read at most 64 KiB per fresh channel; old recordings are never replayed."""
+    if folder is None:
+        if sys.platform!='win32':return []
+        folder=Path(os.environ.get('PROGRAMDATA',r'C:\ProgramData'))/'vMix'/'streaming'
+    now=time.time() if now is None else now
+    latest={}
+    try:
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                match=re.fullmatch(r'streaming([1-5])(?:[ ._-].*)?\.log',entry.name,re.I)
+                if not match or not entry.is_file(follow_symlinks=False):continue
+                try:stat=entry.stat(follow_symlinks=False)
+                except OSError:continue
+                if not -1<=now-stat.st_mtime<=10:continue
+                channel=match.group(1)
+                if channel not in latest or stat.st_mtime>latest[channel][0]:latest[channel]=(stat.st_mtime,entry.path,stat.st_size)
+    except FileNotFoundError:return []
+    except OSError:raise SourceError('Нет доступа к журналам энкодера vMix') from None
+    rows=[]
+    for channel,(stamp,path,size) in latest.items():
+        try:
+            with open(path,'rb') as stream:
+                stream.seek(max(0,size-65536));text=stream.read(65536).decode('utf-8','replace')
+            values=parse_vmix_progress(text)
+        except OSError:continue
+        if values:
+            rows.append({'channel':channel,'ts':stamp,'generation':hashlib.sha256(os.fsencode(path)).hexdigest()[:16],**values})
+    return rows
+
 def parse_vmix_xml(text):
     if len(text)>4*1024*1024 or re.search(r'<!\s*(?:DOCTYPE|ENTITY)\b',text,re.I):
         raise SourceError('vMix XML содержит запрещённые объявления или слишком большой ответ')
@@ -270,7 +313,7 @@ def vmix_kind(name):
     lower=name.lower()
     if 'srt' in lower:return 'srt_output' if 'out' in lower else 'srt_input'
     if 'ndi' in lower:return 'ndi'
-    if lower.startswith('output') or lower in ('stream','record','recording','external','fullscreen'):return 'output'
+    if lower.startswith('output') or re.match(r'^(?:stream(?:ing)?|record(?:ing)?|external|fullscreen)(?:\s*[#\d]|$)',lower):return 'output'
     return 'input'
 
 def integer(text):
@@ -370,14 +413,26 @@ if sys.platform=='win32':
                   ('fmt',ctypes.c_int),('lParam',ctypes.c_ssize_t),('iImage',ctypes.c_int),('iOrder',ctypes.c_int),('type',wintypes.UINT),
                   ('pvFilter',ctypes.c_void_p),('state',wintypes.UINT)]
 
-def process_name(pid):
+def process_image(pid):
     if sys.platform!='win32' or not pid:return ''
     handle=kernel32.OpenProcess(0x1000,False,pid)
     if not handle:return ''
     try:
         size=wintypes.DWORD(1024);buffer=ctypes.create_unicode_buffer(1024)
-        return os.path.basename(buffer.value).lower() if kernel32.QueryFullProcessImageNameW(handle,0,buffer,ctypes.byref(size)) else ''
+        return buffer.value if kernel32.QueryFullProcessImageNameW(handle,0,buffer,ctypes.byref(size)) else ''
     finally:kernel32.CloseHandle(handle)
+
+def process_name(pid):
+    return os.path.basename(process_image(pid)).lower()
+
+def encoder_app(name,image,processes):
+    # Some vMix versions launch ffmpeg.exe, others ffmpeg2.exe. A standalone
+    # FFmpeg must retain its own identity; only the vMix installation is linked.
+    if name=='ffmpeg.exe' and image:
+        path=Path(image)
+        if path.parent.name.lower()=='streaming' and any((path.parent.parent/exe).is_file() for exe in ('vMix64.exe','vMix.exe')):
+            return 'vMix'
+    return processes[name]
 
 def _windows(parent=None):
     found=[]
@@ -554,7 +609,8 @@ def encoder_connections(ndi_endpoints=(),processes=None,exclude_pids=(),estats=T
         protocol=classify_connection(conn,ndi_endpoints)
         # Loopback is the control plane (WebSocket/API) unless it carries NDI.
         if is_loopback(conn['remote']) and protocol!='NDI':continue
-        conn={**conn,'process':name,'app':processes[name],'protocol':protocol}
+        app=encoder_app(name,process_image(conn['pid']) if name=='ffmpeg.exe' else '',processes)
+        conn={**conn,'process':name,'app':app,'protocol':protocol}
         conn['estats']=tcp_estats(conn) if estats else None
         conn.pop('row');result.append(conn)
     return result

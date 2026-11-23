@@ -26,6 +26,8 @@ from linkradar.ui import update_checker
 from linkradar.ui.log_widgets import update_lines,format_events
 from linkradar.core.plot_sampling import nearest_point
 from linkradar.ui.plot_widgets import CachedPlot
+from linkradar.ui.timeline import Timeline
+from linkradar.core.plot_sampling import bucket_points
 from linkradar.system import background_engine
 from linkradar.system import mac_background
 from linkradar.system import mac_capture
@@ -59,11 +61,11 @@ def endpoint(value):
 class Snapshot(QThread):
     ready=Signal(object)
     failed=Signal(str)
-    def __init__(self, monitor, sid, period, selected_node=None, event_after=0, revision=0):
-        super().__init__();self.monitor=monitor;self.sid=sid;self.period=period;self.selected_node=selected_node;self.event_after=event_after;self.revision=revision;self.stop=threading.Event()
+    def __init__(self, monitor, sid, period, selected_node=None, event_after=0, revision=0, focus_end=None):
+        super().__init__();self.monitor=monitor;self.sid=sid;self.period=period;self.selected_node=selected_node;self.event_after=event_after;self.revision=revision;self.focus_end=focus_end;self.stop=threading.Event()
     def run(self):
         try:
-            result=self.monitor.snapshot(self.sid,self.period,compact=True,selected_node=self.selected_node,event_after=self.event_after,cancel=self.stop)
+            result=self.monitor.snapshot(self.sid,self.period,focus_end=self.focus_end,compact=True,selected_node=self.selected_node,event_after=self.event_after,cancel=self.stop)
             result['_ui_revision']=self.revision;result['_ui_period']=self.period
             if not self.stop.is_set():self.ready.emit(result)
         except Exception as exc:
@@ -240,17 +242,27 @@ class Graph(CachedPlot):
                 left=r.left() if i==0 else r.right()-label_width if i==time_ticks-1 else x(ts)-label_width/2
                 alignment=Qt.AlignmentFlag.AlignLeft if i==0 else Qt.AlignmentFlag.AlignRight if i==time_ticks-1 else Qt.AlignmentFlag.AlignCenter
                 p.drawText(QRectF(left,r.bottom()+5,label_width,18),alignment,format_timestamp(ts))
+        # Collapse subpixel flaps before issuing QPainter calls. Raw hover stays exact.
+        sampled=self.points
+        if len(self.points)>r.width()*8:
+            buckets={}
+            for point in self.points:
+                if self.start<=point['ts']<=self.end:
+                    buckets.setdefault(int(x(point['ts'])),[]).append(point)
+            sampled=[point for rows in buckets.values() for point in bucket_points(rows)]
+        series_pen=QPen(QColor('#f59e75' if self.jitter else '#dce6f4'),1.3)
+        failure_pen=QPen(QColor('#ef6275'),1);error_pen=QPen(QColor('#d39d45'),1,Qt.PenStyle.DashLine)
         last=None
-        for q in self.points:
+        for q in sampled:
             value=q.get(key)
             if value is None or q['status']!='ok':
                 last=None
                 if not self.jitter:
                     local_error=q['status']=='error'
-                    p.setPen(QPen(QColor('#d39d45' if local_error else '#ef6275'),1,Qt.PenStyle.DashLine if local_error else Qt.PenStyle.SolidLine));p.drawLine(int(x(q['ts'])),int(r.top()),int(x(q['ts'])),int(r.bottom()))
+                    p.setPen(error_pen if local_error else failure_pen);p.drawLine(int(x(q['ts'])),int(r.top()),int(x(q['ts'])),int(r.bottom()))
                 continue
             xx,yy=x(q['ts']),y(value)
-            p.setPen(QPen(QColor('#f59e75' if self.jitter else '#dce6f4'),1.3))
+            p.setPen(series_pen)
             if last and not q.get('break_before') and q['ts']-last[2]<max(3,(self.end-self.start)/200):
                 p.drawLine(int(last[0]),int(last[1]),int(xx),int(yy))
             else:p.drawEllipse(QRectF(xx-1,yy-1,2,2))
@@ -422,6 +434,10 @@ class Window(QMainWindow):
         self.port_splitter=QSplitter(Qt.Orientation.Vertical);self.port_splitter.setChildrenCollapsible(False);self.port_splitter.setHandleWidth(6)
         network_row=QWidget();network_columns=QHBoxLayout(network_row);network_columns.setContentsMargins(0,0,0,0);network_columns.setSpacing(8)
         network_columns.addWidget(self.network_panel,0,Qt.AlignmentFlag.AlignTop);network_columns.addWidget(self.port_panel,1)
+        if sys.platform=='win32':
+            self.port_panel.hide();self.port_panel.timer.stop();self.port_panel.clock.stop()
+            network_columns.addStretch(1)
+            self.copy_button.setToolTip('Скопировать Switch, Port, VLAN, IP, MASK, GATEWAY и MAC')
         self.port_splitter.addWidget(network_row);lower=QWidget();self.port_splitter.addWidget(lower);layout.addWidget(self.port_splitter,1)
         layout=QVBoxLayout(lower);layout.setContentsMargins(0,0,0,0);layout.setSpacing(6)
         self.traffic_panel=TrafficPanel();self.capture_height=150
@@ -455,6 +471,7 @@ class Window(QMainWindow):
         self.precision_label=QLabel('RTT: шаг 1 мс');self.precision_label.setStyleSheet('font-size:10px;color:#91a2bb;');self.precision_label.setToolTip(precision_note())
         controls.addStretch(1)
         speed_row=QHBoxLayout();speed_row.setSpacing(4);speed_row.addWidget(self.speed_button);speed_row.addWidget(self.speed_readout);controls.addLayout(speed_row)
+        self.speed_ping=QLabel('Ping: —');self.speed_ping.setStyleSheet('font-size:10px;color:#91a2bb;');controls.addWidget(self.speed_ping)
         sidebar.setMinimumHeight(controls.minimumSize().height())
         self.panes=QSplitter(Qt.Orientation.Horizontal);self.panes.setChildrenCollapsible(False);self.panes.setHandleWidth(6)
         self.panes.setToolTip('Перетащите разделитель между маршрутом и графиками, чтобы изменить ширину колонок')
@@ -477,6 +494,7 @@ class Window(QMainWindow):
         for value,label in PERIODS:self.period.addItem(label,value)
         self.period.setCurrentIndex(1);self.period.currentIndexChanged.connect(self.refresh);chart_header.addWidget(self.period);charts_layout.addLayout(chart_header)
         self.jitter=Graph(True);self.graph=Graph();charts_layout.addWidget(self.jitter,2);charts_layout.addWidget(self.graph,5)
+        self.timeline=Timeline();self.timeline.changed.connect(self.history_changed);charts_layout.addWidget(self.timeline)
         self.panes.addWidget(route_panel);self.panes.addWidget(charts_panel);self.panes.setStretchFactor(0,1);self.panes.setStretchFactor(1,1);self.panes.setSizes([620,460]);columns.addWidget(self.panes,1);layout.addWidget(diagnostics,1)
         for graph in [self.jitter,self.graph]:graph.zoom.connect(self.zoom)
         self.logs=QPlainTextEdit();self.logs.setReadOnly(True);self.logs.setMaximumHeight(120);self.logs.hide()
@@ -562,7 +580,7 @@ class Window(QMainWindow):
         # window minimum without bound. The Network tab is balanced when shown again.
         if self.closing or not self.port_splitter.isVisible():return
         expanded=self.traffic_panel.expanded
-        weights=list(BLOCK_WEIGHTS)+([1] if expanded else [])
+        weights=([0,1.7] if sys.platform=='win32' else list(BLOCK_WEIGHTS))+([1] if expanded else [])
         monitor=self.traffic_splitter.widget(1)
         available=self.port_splitter.sizes()[0]+monitor.height()+(self.traffic_splitter.sizes()[0] if expanded else 0)
         mins=[self.port_splitter.widget(0).minimumSizeHint().height(),monitor.minimumSizeHint().height()]+([self.traffic_panel.minimumSizeHint().height()] if expanded else [])
@@ -649,6 +667,7 @@ class Window(QMainWindow):
         except graphene_port.SourceError:pass
         text='\n'.join([f'Switch: {host}',f'Port: {port}',f"VLAN: {values['vlan']}",f'Graphene: {query}',
                         f"IP: {values['ip']}",f"MASK: {values['mask']}",f"GATEWAY: {values['gateway']}",f"MAC: {values['mac']}"])
+        if sys.platform=='win32':text='\n'.join(line for line in text.splitlines() if not line.startswith('Graphene:'))
         QApplication.clipboard().setText(text)
         self.copy_button.setText('Copied');QTimer.singleShot(1200,lambda:self.copy_button.setText('Copy'))
     def show_network(self,data):
@@ -673,7 +692,7 @@ class Window(QMainWindow):
         gateway=local.get('gateway')
         if isinstance(gateway,list):gateway=gateway[0] if gateway else None
         self.address.set_gateway(str(gateway) if gateway else None)
-        self.port_panel.lldp(neighbor)
+        if sys.platform!='win32':self.port_panel.lldp(neighbor)
         self.traffic_panel.set_source(local,neighbor)
         for key,value in self.network_fields.items():
             raw=neighbor.get(key) if key in ('switch','port','vlan') else local.get(key)
@@ -689,6 +708,7 @@ class Window(QMainWindow):
         if self.speed_worker:self.speed_worker.deleteLater()
         self.speed_worker=SpeedWorker(self.selected_interface);self.speed_worker.progress.connect(self.speed_progress);self.speed_worker.ready.connect(self.speed_result);self.speed_worker.failed.connect(self.speed_failure)
         self.speed_button.set_progress(0,'0%');self.speed_active=True;self.load_windows.append([time.time(),None]);self.speed_readout.setText('↓ — ↑ — Мбит/с');self.speed_readout.setToolTip('HTTP-тест: выбранный адаптер, а в Auto — маршрут ОС. DNS — резолвер ОС. Создаёт нагрузку на канал.')
+        self.speed_ping.setText('Ping: измеряем…')
         for graph in [self.graph,self.jitter]:graph.load_windows=self.load_windows;graph.invalidate_chart();graph.update()
         self.note('Начат тест скорости: канал под нагрузкой (синяя область графика)')
         self.speed_worker.start()
@@ -696,6 +716,11 @@ class Window(QMainWindow):
         if self.closing:return
         phase=data['phase']
         percent=max(self.speed_button.progress,min(99,int(data.get('total_progress',0)*100)))
+        if phase=='ping':
+            value=data.get('latency')
+            self.speed_ping.setText('Ping: '+(rtt_text(value)+' мс' if value is not None else 'нет ICMP-ответа'))
+            self.speed_ping.setToolTip('ICMP до '+str(data.get('host',''))+' через выбранный адаптер. Измеряется отдельно от RTT сервера диагностики.')
+            return
         caption='Подготовка' if phase=='config' else ('↓ Загрузка' if phase=='download' else '↑ Отдача')+(' · прогрев' if data.get('warmup') else '')
         self.speed_button.set_progress(percent,f'{percent}%');self.speed_button.setAccessibleDescription(f'{caption}. Общий прогресс теста скорости: {percent}%')
         if phase!='config':self.speed_readout.setText(('↓ ' if phase=='download' else '↑ ')+fmt(data['mbps'])+' Мбит/с')
@@ -757,6 +782,7 @@ class Window(QMainWindow):
         self.started_session(config,self.monitor.start(config))
     def started_session(self,config,sid):
         self.sid=sid;self.session_config=config;self.paused=False;self.selected_node=None;self.snapshot={}
+        self.timeline.focus_end=None
         self.log_lines=[];self.event_labels={};self.logs.clear();self.port_seen={};self.port_pending={};self.port_prune_at=0;self.data_error=None;
         if self.io:self.io.data_error=None
         self.timer.setInterval(int(config['interval']*1000))
@@ -894,8 +920,10 @@ class Window(QMainWindow):
     def refresh(self,*args):
         self.prune_history()
         if not self.sid or self.closing or self.command_busy or (self.worker and self.worker.isRunning()):return
+        session=self.snapshot.get('session')
+        if session:self.timeline.set_bounds(session['started'],session['ended'] or (self.monitor.pause_at if not self.service and self.paused else time.time()) or time.time(),self.period.currentData())
         if self.worker:self.worker.deleteLater()
-        self.worker=Snapshot(self.monitor,self.sid,self.period.currentData(),self.selected_node,self.snapshot.get('events_cursor',0),self.state_revision);self.worker.ready.connect(self.render);self.worker.failed.connect(self.failure);self.worker.start()
+        self.worker=Snapshot(self.monitor,self.sid,self.period.currentData(),self.selected_node,self.snapshot.get('events_cursor',0),self.state_revision,self.timeline.focus_end);self.worker.ready.connect(self.render);self.worker.failed.connect(self.failure);self.worker.start()
     def refresh_visible(self,*args):
         # Probes and retention run independently. Hidden views need no full
         # 12-hour read/repaint; a requested server change must still finish.
@@ -962,6 +990,7 @@ class Window(QMainWindow):
         self.cards[2].setText(rtt_text(s['avg'])+' мс');self.cards[3].setText(rtt_text(s['max'])+' мс')
         for card in self.cards:card.setToolTip('Конечный сервер '+ping['host']+' · выбранный период; ICMP не измеряет jitter видеопотока'+('\n'+precision_note() if precision_note() else ''))
         end=snapshot['session']['analysis_end']
+        session=snapshot['session'];self.timeline.set_bounds(session['started'],session['ended'] or session['started']+session['elapsed'],self.period.currentData())
         for graph in [self.jitter,self.graph]:graph.set_data(points,end,self.period.currentData())
         if update_events:self.update_logs(snapshot['events'])
         if self.data_error:self.live.setText('ОШИБКА ЗАПИСИ');self.live.setToolTip(self.data_error)
@@ -997,6 +1026,8 @@ class Window(QMainWindow):
         hops=self.snapshot.get('targets',[{}])[0].get('hops',[])
         if 0<=row<len(hops) and self.selected_node!=hops[row]['node']:
             self.selected_node=hops[row]['node'];self.render(self.snapshot);self.refresh()
+    def history_changed(self):
+        self.state_revision+=1;self.refresh()
     def zoom(self,direction):self.period.setCurrentIndex(max(0,min(self.period.count()-1,self.period.currentIndex()+direction)))
     def closeEvent(self,event):
         if self.closed_clean:event.accept();return

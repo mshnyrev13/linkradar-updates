@@ -12,10 +12,15 @@
 
 ## Источники
 
+Графики имеют ползунок истории и кнопку «Сейчас». Просмотр прошлого не
+останавливает сбор; выбранный конец периода остаётся фиксированным.
+Отчёт по-прежнему охватывает текущий выбранный период до момента запроса.
+
 | Источник | Что даёт | Ограничения |
 | --- | --- | --- |
 | OBS, obs-websocket 5 (`GetStats`, `GetStreamStatus`, `GetRecordStatus`, `GetOutputList/Status`, `GetVideoSettings`, `GetStreamServiceSettings`) | состояние, длительность, байты → битрейт, потерянные сетью кадры, congestion 0–1, переподключения, FPS, пропуски рендера и кодировщика, CPU, сервер без ключа | OBS 28+; SRT-статистика libsrt (RTT/потери пакетов SRT) через WebSocket недоступна |
 | vMix XML API | трансляция/запись/External/MultiCorder вкл/выкл, каналы, входы SRT/NDI/Stream | битрейта и потерь в API нет |
+| Журнал FFmpeg vMix | средний битрейт кодировщика и FPS; строки «vMix · Энкодер N». Один свежий канал также служит fallback локальной трансляции API | Windows, `ProgramData/vMix/streaming`, только последние 64 КиБ на канал и обновления не старше 10 секунд. Не сообщает TCP RTT, congestion и сетевые потери. Команды, URL и ключи не сохраняются |
 | Окно vMix Statistics (Win32 ListView) | Overview: Source/Renderer dropped, Resync, Queue, Fullscreen dropped и задержка выхода, аудиобуфер/потери/ресемплинг, `Connected ip:port` (если vMix его пишет); вкладка SRT: Bandwidth (mbps) → битрейт, Packet Loss (%), RTT (ms), Duration; Δ за секунду. Переименованный SRT/NDI-вход распознаётся по типу из API | окно должно быть открыто; читаются оба списка (Overview и SRT). Overview и заголовки SRT сверены с vMix 26.0.0.45; строки вкладки SRT вживую не видели (она была пуста при SRT-входе — вероятно, показывает SRT-выходы vMix) |
 | TCP-соединения энкодеров (OBS, vMix, FFmpeg) | адрес ingest, протокол по порту (1935 RTMP, 443 RTMPS, 5960–5999 NDI); с ESTATS — битрейт, RTT, ретрансмиты | Windows; ESTATS включается только при запуске от администратора. HTTPS-соединения OBS/vMix показываются только во время эфира |
 | NDI mDNS (`_ndi._tcp.local`) | имена и адреса источников NDI в сети | без NDI Discovery Server; статистики кадров NDI нет (кроме строк vMix Statistics) |

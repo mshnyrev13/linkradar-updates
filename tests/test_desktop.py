@@ -128,7 +128,8 @@ class NativeControls(unittest.TestCase):
                     self.assertLessEqual(widget.mapTo(w,QPoint(0,widget.height())).y(),w.height())
                 for upper,lower in zip((w.address,w.button,w.cards[0]),(w.button,w.cards[0],w.cards[1])):
                     self.assertLessEqual(upper.mapTo(w,QPoint(0,upper.height())).y(),lower.mapTo(w,QPoint()).y())
-                self.assertGreater(w.table.columnWidth(8),140)
+                # Windows Fusion has wider minimum numeric columns than macOS.
+                self.assertGreater(w.table.columnWidth(8),80 if sys.platform=='win32' else 140)
                 self.assertTrue(w.table.isColumnHidden(1));self.assertTrue(w.table.isColumnHidden(3))
 
     def test_help_actions_remain_available_without_a_windows_menu_row(self):
