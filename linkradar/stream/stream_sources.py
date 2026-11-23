@@ -28,7 +28,8 @@ from urllib3.exceptions import HTTPError as TransportError
 OBS_PORT=4455
 VMIX_API='http://127.0.0.1:8088/api'
 # Processes whose TCP connections are treated as encoder traffic.
-ENCODERS={'obs64.exe':'OBS','obs32.exe':'OBS','obs.exe':'OBS','vmix64.exe':'vMix','vmix.exe':'vMix','ndinode.exe':'vMix','ffmpeg2.exe':'vMix','ffmpeg.exe':'FFmpeg'}
+ENCODERS={'obs64.exe':'OBS','obs32.exe':'OBS','obs.exe':'OBS','vmix64.exe':'vMix','vmix.exe':'vMix','ndinode.exe':'vMix','ffmpeg.exe':'FFmpeg','ffmpeg2.exe':'FFmpeg','ffmpeg6.exe':'FFmpeg'}
+FFMPEG_ENCODERS={'ffmpeg.exe','ffmpeg2.exe','ffmpeg6.exe'}
 STREAM_OUTPUTS={'simple_stream','adv_stream'}
 RECORD_OUTPUTS={'simple_file_output','adv_file_output','adv_ffmpeg_output'}
 
@@ -426,9 +427,9 @@ def process_name(pid):
     return os.path.basename(process_image(pid)).lower()
 
 def encoder_app(name,image,processes):
-    # Some vMix versions launch ffmpeg.exe, others ffmpeg2.exe. A standalone
+    # vMix ships ffmpeg.exe, ffmpeg2.exe and ffmpeg6.exe. A standalone
     # FFmpeg must retain its own identity; only the vMix installation is linked.
-    if name=='ffmpeg.exe' and image:
+    if name in FFMPEG_ENCODERS and image:
         path=Path(image)
         if path.parent.name.lower()=='streaming' and any((path.parent.parent/exe).is_file() for exe in ('vMix64.exe','vMix.exe')):
             return 'vMix'
@@ -609,7 +610,7 @@ def encoder_connections(ndi_endpoints=(),processes=None,exclude_pids=(),estats=T
         protocol=classify_connection(conn,ndi_endpoints)
         # Loopback is the control plane (WebSocket/API) unless it carries NDI.
         if is_loopback(conn['remote']) and protocol!='NDI':continue
-        app=encoder_app(name,process_image(conn['pid']) if name=='ffmpeg.exe' else '',processes)
+        app=encoder_app(name,process_image(conn['pid']) if name in FFMPEG_ENCODERS else '',processes)
         conn={**conn,'process':name,'app':app,'protocol':protocol}
         conn['estats']=tcp_estats(conn) if estats else None
         conn.pop('row');result.append(conn)

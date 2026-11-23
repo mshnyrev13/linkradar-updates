@@ -88,6 +88,8 @@ class VmixRTMP(unittest.TestCase):
         self.assertNotIn('SECRET',json.dumps(row));self.assertNotIn('password',json.dumps(row))
         self.assertIsNone(sources.parse_vmix_progress(self.progress+'\nConversion failed!'))
         self.assertIsNone(sources.parse_vmix_progress('frame= malformed'))
+        six=sources.parse_vmix_progress('frame= 42 fps=29.97 q=-0.0 size= 256KiB time=00:00:01.40 bitrate= 1497.9kbits/s speed=1x')
+        self.assertEqual((six['frames'],six['fps'],six['bytes'],six['bitrate']),(42,29.97,262144,1497.9))
 
     def test_only_fresh_logs_are_read_and_tail_is_bounded(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -120,9 +122,15 @@ class VmixRTMP(unittest.TestCase):
         self.assertIsNone(m.streams['vmix:stream']['bitrate']);self.assertIsNone(m.streams['vmix:stream']['fps'])
 
     def test_vmix_external_encoder_is_collected(self):
-        conn={'pid':42,'remote':'192.0.2.1','remote_port':1935,'local_port':50000,'row':None}
-        with patch.object(sources,'tcp_table',return_value=[conn]),patch.object(sources,'process_name',return_value='ffmpeg2.exe'),patch.object(sources,'tcp_estats',return_value=None):rows=sources.encoder_connections()
-        self.assertEqual(rows[0]['app'],'vMix');self.assertEqual(rows[0]['protocol'],'RTMP')
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'streaming').mkdir();(root/'vMix64.exe').touch()
+            names={42:'ffmpeg.exe',43:'ffmpeg2.exe',44:'ffmpeg6.exe',45:'ffmpeg6.exe'}
+            images={pid:str(root/('standalone' if pid==45 else 'streaming')/name) for pid,name in names.items()}
+            connections=[{'pid':pid,'remote':'192.0.2.1','remote_port':1935,'local_port':50000+i,'row':None} for i,pid in enumerate((42,43,44,44,45))]
+            with patch.object(sources,'tcp_table',return_value=connections),patch.object(sources,'process_name',side_effect=names.get),patch.object(sources,'process_image',side_effect=images.get),patch.object(sources,'tcp_estats',return_value=None):rows=sources.encoder_connections()
+        self.assertEqual([row['app'] for row in rows],['vMix','vMix','vMix','vMix','FFmpeg'])
+        self.assertEqual([row['process'] for row in rows],['ffmpeg.exe','ffmpeg2.exe','ffmpeg6.exe','ffmpeg6.exe','ffmpeg6.exe'])
+        self.assertTrue(all(row['protocol']=='RTMP' for row in rows))
 
     def test_vmix_bitrate_updates_and_clears_when_counters_disappear(self):
         m=engine.StreamMonitor();m.stream('vmix:stream',1,source='vMix',state='live')
