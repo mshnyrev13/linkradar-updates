@@ -148,7 +148,7 @@ class StreamMonitor:
         if obs is UNSET:obs=self.fetch('obs',self.read_obs,1,now)
         if vmix_api is UNSET:vmix_api=self.fetch('vmix_api',lambda:sources.vmix_api(settings['vmix_url']),2,now)
         if ndi is UNSET:ndi=self.fetch('ndi',sources.discover_ndi,15,now) if settings['ndi'] else None
-        if vmix_rows is UNSET:vmix_rows=self.fetch('vmix_stats',lambda:sources.vmix_statistics() or CLOSED,1,now)
+        if vmix_rows is UNSET:vmix_rows=self.fetch('vmix_stats',lambda:CLOSED if (rows:=sources.vmix_statistics()) is None else rows,1,now)
         else:
             if vmix_rows is None:vmix_rows=CLOSED
         with self.lock:
@@ -463,8 +463,10 @@ class StreamMonitor:
                 lines.append(f"    Кадры: всего {s.get('frames_total') if s.get('frames_total') is not None else '—'} · потеряно {s.get('frames_dropped') if s.get('frames_dropped') is not None else '—'} ({fmt(s.get('drop_pct'),2)}%) · за период {stat['dropped']}")
             if stat['congestion']:lines.append(f"    Congestion (0–1): {triple('congestion',2)}")
             if stat['rtt']:
-                lines.append(f"    TCP RTT, мс: {triple('rtt')} · ретрансмиты: {triple('retrans_pct',2,' %')}")
-                if stat['rtt']['max']<=1 and is_public(s.get('tcp_target') or s.get('target')):lines.append('    RTT ≤1 мс до внешнего адреса: вероятно, локальный VPN/прокси, RTT и ретрансмиты — до него, а не до ingest')
+                if s.get('protocol')=='SRT':lines.append(f"    SRT RTT, мс: {triple('rtt')}")
+                else:
+                    lines.append(f"    TCP RTT, мс: {triple('rtt')} · ретрансмиты: {triple('retrans_pct',2,' %')}")
+                    if stat['rtt']['max']<=1 and is_public(s.get('tcp_target') or s.get('target')):lines.append('    RTT ≤1 мс до внешнего адреса: вероятно, локальный VPN/прокси, RTT и ретрансмиты — до него, а не до ingest')
             if s.get('latency') is not None:lines.append(f"    Задержка vMix: {s['latency']} мс")
             if s.get('note'):lines.append('    Примечание: '+s['note'])
             if s.get('observation_gap'):lines.append('    Наблюдение прерывалось: статистика содержит только известные сегменты; события во время паузы могли быть пропущены.')

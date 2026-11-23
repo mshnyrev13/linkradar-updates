@@ -21,7 +21,7 @@
 | OBS, obs-websocket 5 (`GetStats`, `GetStreamStatus`, `GetRecordStatus`, `GetOutputList/Status`, `GetVideoSettings`, `GetStreamServiceSettings`) | состояние, длительность, байты → битрейт, потерянные сетью кадры, congestion 0–1, переподключения, FPS, пропуски рендера и кодировщика, CPU, сервер без ключа | OBS 28+; SRT-статистика libsrt (RTT/потери пакетов SRT) через WebSocket недоступна |
 | vMix XML API | трансляция/запись/External/MultiCorder вкл/выкл, каналы, входы SRT/NDI/Stream | битрейта и потерь в API нет |
 | Журнал FFmpeg vMix | средний битрейт кодировщика и FPS; строки «vMix · Энкодер N». Один свежий канал также служит fallback локальной трансляции API | Windows, `ProgramData/vMix/streaming`, только последние 64 КиБ на канал и обновления не старше 10 секунд. Не сообщает TCP RTT, congestion и сетевые потери. Команды, URL и ключи не сохраняются |
-| Окно vMix Statistics (Win32 ListView) | Overview: Source/Renderer dropped, Resync, Queue, Fullscreen dropped и задержка выхода, аудиобуфер/потери/ресемплинг, `Connected ip:port` (если vMix его пишет); вкладка SRT: Bandwidth (mbps) → битрейт, Packet Loss (%), RTT (ms), Duration; Δ за секунду. Переименованный SRT/NDI-вход распознаётся по типу из API | окно должно быть открыто; читаются оба списка (Overview и SRT). Overview и заголовки SRT сверены с vMix 26.0.0.45; строки вкладки SRT вживую не видели (она была пуста при SRT-входе — вероятно, показывает SRT-выходы vMix) |
+| Окно vMix Statistics (Win32 ListView) | Overview: Source/Renderer dropped, Resync, Queue, Fullscreen dropped и задержка выхода, аудиобуфер/потери/ресемплинг, `Connected ip:port`; SRT: Bandwidth (mbps) → битрейт, Packet Loss (%), RTT (ms), Duration. Encoders vMix 28: источник, кодек, размер, FPS и Dropped Frames в подробностях, отдельно от счётчиков Overview | держите открытой нужную вкладку Statistics. vMix 28 замораживает скрытые таблицы: сборщик читает только видимую, чтобы не выдавать старые значения за свежие. SRT-выход и Encoders проверены вживую в 28.0.0.42 |
 | TCP-соединения энкодеров (OBS, vMix, FFmpeg) | адрес ingest, протокол по порту (1935 RTMP, 443 RTMPS, 5960–5999 NDI); с ESTATS — битрейт, RTT, ретрансмиты | Windows; ESTATS включается только при запуске от администратора. HTTPS-соединения OBS/vMix показываются только во время эфира |
 | NDI mDNS (`_ndi._tcp.local`) | имена и адреса источников NDI в сети | без NDI Discovery Server; статистики кадров NDI нет (кроме строк vMix Statistics) |
 
@@ -32,8 +32,14 @@ SRT по UDP не виден в таблице TCP; для SRT использу�
 связываются по расположению в `streaming` рядом с `vMix.exe`/`vMix64.exe`;
 отдельная установка FFmpeg остаётся самостоятельным источником.
 Общая строка трансляции vMix использует наиболее активное подходящее
-RTMP/RTMPS-соединение, а не сумму всех выходов. Распознавание FFmpeg 6 и его
-progress-формата проверено фикстурами; живой эфир с этим вариантом ещё не проверен.
+RTMP/RTMPS-соединение, а не сумму всех выходов. В vMix 28.0.0.42 проверены
+настоящие RTMP-потоки из UI с FFMPEG (процесс ffmpeg2.exe) и FFMPEG6
+(ffmpeg6.exe), с видео и звуком, локальным приёмником и живыми графиками.
+
+Для SRT выберите Statistics → SRT и строку с протоколом SRT в LinkRadar:
+она содержит битрейт, RTT и потери пакетов в примечании. Строка Overview
+«SRT выход» содержит счётчики кадров. Это разные метрики. В отчёте RTT SRT
+не обозначается как TCP; TCP-ретрансмиты к SRT не относятся.
 
 Строки vMix 26 (сверено вживую): выход — `Output | 0 | 0 | 0 | 0 | Fullscreen Dropped: 4 0 14 (16 ms) |`; SRT-вход (listener, поток OBS) — `SRT  5000 | 14788 | 0 | 26 | 2 | 33 33 33 34 (144) | 120/40 ms Dropped: 24784/0 Resampled: 80/485720`. В колонке Video входа — интервалы кадров (33 мс при 30 fps) и число в скобках без единиц; оно не выдаётся за задержку. `Connected ip:port` у SRT-входа в режиме listener нет.
 

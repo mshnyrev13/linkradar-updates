@@ -21,8 +21,15 @@ Graphene на Windows скрыт; его таймеры и автозапрос�
 vMix учитывает ffmpeg.exe, ffmpeg2.exe и ffmpeg6.exe из каталога streaming
 установленного vMix. Отдельные установки этих энкодеров остаются FFmpeg и не
 привязываются к vMix. Проверены одновременное обнаружение трёх имён, несколько
-соединений одного процесса и progress-строка FFmpeg 6 с KiB; живой vMix/FFmpeg 6
-пока не проверен из-за отсутствующей библиотеки запуска установленного vMix.
+соединений одного процесса и progress-строка FFmpeg 6 с KiB. После устранения
+ReadOnly/Hidden/System у ProgramData/vMix/video.txt vMix 28.0.0.42 запущен:
+проверены реальные RTMP из UI с FFMPEG (ffmpeg2.exe), FFMPEG6 и SRT-выход.
+Приёмники декодировали H264/AAC, LinkRadar получил битрейт/FPS из журналов и
+SRT bandwidth/RTT/loss из Statistics. Локальные тесты не проверяют YouTube ingest.
+В vMix 28 скрытые вкладки Statistics перестают обновляться: читается только
+видимая таблица, SRT нужно оставить выбранной. Encoders разбирается отдельно:
+Source «Output 1» не является Source Dropped. Неизвестные таблицы не угадываются.
+RTT SRT в отчёте подписан SRT, подсказки не предлагают для него TCP ESTATS.
 TCP-битрейт обновляется при каждом опросе и очищается при исчезновении счётчиков.
 Свежие журналы `ProgramData/vMix/streaming/streaming[1-5]*.log` читаются только
 для числовых frame/fps/size/time/bitrate: максимум 64 КиБ на канал, TTL 10 секунд.

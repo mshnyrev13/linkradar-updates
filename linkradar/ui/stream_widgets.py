@@ -24,7 +24,7 @@ LEVEL_COLORS=('#dce6f4','#f4cd35','#ef6275')
 COLUMNS=['Источник','Протокол','Назначение','Состояние','В эфире','Битрейт','FPS','Потеряно','Потери/с','Буфер','RTT','Повторы, %','Примечание']
 COLUMN_TIPS=['','','Сервер приёма без ключа или адрес соединения','','Длительность эфира','Битрейт, кбит/с','Кадров в секунду',
              'Потеряно кадров всего (доля, %)','Среднее число потерянных кадров в секунду между двумя свежими опросами; после паузы нужен новый замер','Congestion OBS 0–1: заполненность буфера отправки',
-             'RTT TCP до сервера приёма, мс','Повторно отправленные TCP-сегменты, %','']
+             'RTT до сервера приёма, мс: TCP либо SRT по источнику строки','Повторно отправленные TCP-сегменты, %','']
 COLUMN_WIDTHS=[170,80,220,110,70,80,50,110,70,70,55,70,220]
 VMIX_COLUMNS=['vMix Statistics','Тип','Source','Renderer','Resync','Queue','Видео / аудио','Δ за опрос']
 VMIX_WIDTHS=[160,80,60,70,60,60,260,170]
@@ -40,6 +40,11 @@ def missing_metric_message(stream,status,keys,remote_vmix=False):
     key=stream['key']
     if key.startswith('vmix:encoder:'):
         return 'Журнал FFmpeg сообщает битрейт и FPS; потери сети, буфер OBS и TCP RTT в нём отсутствуют'
+    if key.startswith('vmix:srt:'):
+        if 'dropped_rate' in keys:return 'SRT сообщает потери пакетов, а не кадров; показатель — в примечании строки'
+        return 'Показатель SRT доступен в vMix Statistics → SRT; буфер OBS к нему не относится'
+    if key.startswith('vmix:stat:') and str(stream.get('protocol','')).startswith('SRT') and ('bitrate' in keys or 'rtt' in keys):
+        return 'Откройте vMix Statistics → SRT и выберите строку с протоколом SRT для битрейта и RTT'
     if key.startswith('vmix:'):
         if 'dropped_rate' in keys:
             if remote_vmix:return 'Потери кадров доступны через Statistics на компьютере с vMix'

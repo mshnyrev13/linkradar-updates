@@ -78,6 +78,18 @@ OBS_RESPONSES={'GetVersion':{'obsVersion':'32.1.2','obsWebSocketVersion':'5.6.0'
     'GetOutputStatus':{'outputActive':True,'outputBytes':0,'outputSkippedFrames':0,'outputTotalFrames':10}}
 
 class Sources(unittest.TestCase):
+    def test_vmix28_encoders_source_name_is_not_a_dropped_counter(self):
+        headers=['Name','Source','Audio','Resolution','Codec','FPS','Dropped Frames']
+        rows=sources.parse_vmix_list(headers,[['Stream1','Output 1','Master','1280x720','H264 (Software)','-',''],
+                                             ['Output 2','Output 2','Bus A','1920x1080','H264 (NVIDIA)','29.97','4']])
+        self.assertEqual([r['kind'] for r in rows],['encoder','encoder'])
+        self.assertTrue(all(r['source_dropped'] is None and r['renderer_dropped'] is None for r in rows))
+        self.assertIsNone(rows[0]['fps']);self.assertIsNone(rows[0]['encoder_dropped'])
+        self.assertEqual((rows[1]['fps'],rows[1]['encoder_dropped']),(29.97,4))
+        monitor=stream_monitor.StreamMonitor()
+        self.assertEqual(monitor.update_vmix_rows(100,rows),set())
+        self.assertEqual(monitor.streams,{})
+        self.assertEqual(sources.parse_vmix_list(['Name','Format'],[['Stream1','H264']]),[])
     def test_safe_url_never_keeps_keys_credentials_or_srt_parameters(self):
         self.assertEqual(sources.safe_url('rtmp://user:pw@a.rtmp.youtube.com/live2/abcd-efgh-key'),'rtmp://a.rtmp.youtube.com')
         self.assertEqual(sources.safe_url('srt://10.0.0.5:9000?streamid=#!::r=live/key,m=publish&passphrase=secret'),'srt://10.0.0.5:9000')
@@ -213,7 +225,10 @@ $f.Controls.Add($s);$f.Controls.Add($l);$f.Add_Shown({$s.Visible=$false});$t=New
             rows=sources.parse_vmix_list(*sources.read_list_view(pid,lists[0]))
             self.assertEqual(rows[0]['name'],'SRT Cam');self.assertEqual(rows[0]['source_dropped'],4);self.assertEqual(rows[0]['endpoint'],'10.0.0.9:9000');self.assertEqual(rows[0]['audio_dropped'],1)
             with patch.object(sources,'find_statistics_window',return_value=found):rows=sources.vmix_statistics()
-            self.assertEqual([(r['kind'],r['name']) for r in rows],[('srt_input','SRT Cam'),('srt','Output 1')]);self.assertEqual(rows[1]['bandwidth_kbps'],6000)
+            self.assertEqual([(r['kind'],r['name']) for r in rows],[('srt_input','SRT Cam')])
+            # The hidden SRT list is readable but stale, so it is excluded.
+            hidden=sources.parse_vmix_list(*sources.read_list_view(pid,lists[1]))
+            self.assertEqual(hidden[0]['bandwidth_kbps'],6000)
         finally:process.kill();process.wait(5)
     def test_tcp_table_lists_own_connection_and_estats_degrades_without_rights(self):
         server=socket.socket();server.bind(('127.0.0.1',0));server.listen();client=socket.create_connection(server.getsockname());accepted,_=server.accept()
@@ -236,6 +251,21 @@ def obs_data(seconds,bytes_,skipped,active=True,reconnecting=False,congestion=.0
             'service':{'type':'rtmp_custom','server':'rtmp://ingest.example.net','protocol':'RTMP'},'outputs':[]}
 
 class Monitor(unittest.TestCase):
+    def test_open_empty_statistics_table_is_not_a_closed_window(self):
+        monitor=stream_monitor.StreamMonitor()
+        with patch.object(sources,'vmix_statistics',return_value=[]),patch.object(monitor,'fetch',side_effect=lambda name,fn,*args:fn()):
+            monitor.cycle(obs=sources.SourceError('not used'),vmix_api={},connections=[],ndi=[],vmix_logs=[])
+        self.assertEqual(monitor.status['vmix_stats'],{'state':'ok','text':'0 строк'})
+    def test_srt_report_uses_srt_rtt_without_tcp_retransmits(self):
+        clock=Clock();monitor=stream_monitor.StreamMonitor(clock=clock)
+        row=sources.parse_vmix_list(['Connection','Duration','Bandwidth (mbps)','Packet Loss (%)','Total Data','RTT (ms)'],
+                                   [['Output 1','00:00:09','4.5','2','5 MB','80']])
+        seen=monitor.update_vmix_rows(clock.now,row)
+        for key in seen:monitor.sample(key,clock.now)
+        report=monitor.report()
+        self.assertIn('SRT RTT, мс: сред 80',report)
+        self.assertNotIn('TCP RTT',report);self.assertNotIn('ретрансмиты:',report)
+        self.assertIn('потери пакетов 2 %',report)
     def poll(self,monitor,clock,obs,**extra):
         clock.now+=1;monitor.cycle(clock.now,obs=obs,vmix_api=extra.get('vmix_api',sources.SourceError('vMix API не отвечает')),vmix_rows=extra.get('vmix_rows'),
                                    connections=extra.get('connections',[]),ndi=extra.get('ndi',[]))

@@ -371,7 +371,22 @@ def parse_vmix_srt_rows(headers,rows):
     return result
 
 def parse_vmix_list(headers,rows):
-    return parse_vmix_srt_rows(headers,rows) if is_srt_headers(headers) else parse_vmix_rows(headers,rows)
+    if is_srt_headers(headers):return parse_vmix_srt_rows(headers,rows)
+    # vMix 28 adds Encoders. Its Source is a name (e.g. Output 1),
+    # not Overview's Source Dropped counter.
+    columns=[(h or '').strip().lower() for h in headers]
+    if {'codec','resolution','fps','dropped frames'}<=set(columns):
+        result=[]
+        for raw in rows:
+            raw=[safe_name(t) if i==0 else safe_text(t) for i,t in enumerate(raw)]
+            values=dict(zip(columns,raw))
+            result.append({'name':values.get('name',''),'kind':'encoder','video':' · '.join(f'{h}: {t}' for h,t in zip(headers[1:],raw[1:]) if t),
+                           'audio':'','raw':raw,'fps':number(values.get('fps')),'encoder_dropped':integer(values.get('dropped frames')),
+                           'source_dropped':None,'renderer_dropped':None,'resync':None,'queue':None})
+        return result
+    # Unknown named tables must never be guessed as Overview counters.
+    if headers and not any('dropped' in h for h in columns):return []
+    return parse_vmix_rows(headers,rows)
 
 COUNTERS=('source_dropped','renderer_dropped','fullscreen_dropped','audio_dropped','audio_resampled')
 
@@ -472,7 +487,7 @@ class RemoteBuffer:
 def find_statistics_window(processes=('vmix64.exe','vmix.exe'),title='Statistics'):
     """(pid, list views) of the Statistics window, the visible list first.
 
-    vMix keeps one list per tab (Overview, SRT); the hidden one stays a child window.
+    vMix keeps one list per tab; hidden lists remain children but stop updating.
     """
     for hwnd in _windows():
         if not user32.IsWindowVisible(hwnd) or title.lower() not in _text(hwnd,user32.GetWindowTextW).lower():continue
@@ -508,7 +523,10 @@ def vmix_statistics(processes=('vmix64.exe','vmix.exe'),title='Statistics'):
     found=find_statistics_window(processes,title)
     if not found:return None
     pid,lists=found;rows=[]
-    for hwnd in lists:rows+=parse_vmix_list(*read_list_view(pid,hwnd))
+    for hwnd in lists:
+        # vMix 28 freezes hidden tabs. Reading them would timestamp old
+        # bandwidth/RTT and counters as new measurements on every poll.
+        if user32.IsWindowVisible(hwnd):rows+=parse_vmix_list(*read_list_view(pid,hwnd))
     return rows
 
 # Encoder TCP connections. ESTATS bytes/RTT need collection enabled, which Windows

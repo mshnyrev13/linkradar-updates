@@ -65,6 +65,9 @@ class StreamExplanations(unittest.TestCase):
         self.assertIn('не сообщает',ui.missing_metric_message(stream,{'vmix_stats':{'state':'ok'}}, {'dropped_rate'}))
         self.assertIn('WebSocket',ui.missing_metric_message({'key':'obs:stream','state':'live'},{},{'bitrate'}))
         self.assertIn('не сообщает потери',ui.missing_metric_message({'key':'tcp:vMix:1','state':'connected'},{},{'dropped_rate'}))
+        self.assertIn('потери пакетов',ui.missing_metric_message({'key':'vmix:srt:Out1','state':'connected'},{},{'dropped_rate'}))
+        self.assertNotIn('администратора',ui.missing_metric_message({'key':'vmix:srt:Out1','state':'connected'},{},{'rtt'}))
+        self.assertIn('Statistics → SRT',ui.missing_metric_message({'key':'vmix:stat:SRT Out1','state':'connected','protocol':'SRT выход'},{},{'bitrate'}))
 
 
 class WindowsFeedbackUI(unittest.TestCase):
