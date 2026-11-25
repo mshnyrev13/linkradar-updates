@@ -25,7 +25,7 @@ from linkradar.ui import ui_tasks
 from linkradar.ui import update_checker
 from linkradar.ui.log_widgets import update_lines,format_events
 from linkradar.core.plot_sampling import nearest_point
-from linkradar.ui.plot_widgets import CachedPlot
+from linkradar.ui.plot_widgets import TimePlot
 from linkradar.ui.timeline import Timeline
 from linkradar.core.plot_sampling import bucket_points
 from linkradar.system import background_engine
@@ -207,18 +207,21 @@ def jitter_scale(peak):
     upper=max(1,peak*1.15);power=10**math.floor(math.log10(upper))
     return next(multiplier*power for multiplier in (1,2,5,10) if multiplier*power>=upper)
 
-class Graph(CachedPlot):
+class Graph(TimePlot):
     hover=Signal(str)
     zoom=Signal(int)
     def __init__(self,jitter=False):
-        super().__init__();self.jitter=jitter;self.points=[];self.start=0;self.end=1;self.cursor=None;self.load_windows=[]
-        self.setMouseTracking(True);self.setMinimumHeight(50 if jitter else 96);self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
+        super().__init__();self.jitter=jitter;self.load_windows=[]
+        self.setMinimumHeight(50 if jitter else 96);self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
         self.setToolTip('Jitter — сглаженное изменение соседних RTT (EWMA, alpha=1/16), мс. ICMP jitter не определяет качество видеопотока.' if jitter else 'Цветовые зоны — ориентиры ICMP RTT 100/200 мс. Они не определяют качество RTMP. Оранжевый пунктир — локальная ошибка проверки; красная отметка — нет ICMP-ответа.')
     def set_data(self,points,end,period):
         self.points=points;self.end=end;self.start=end-period;self.invalidate_chart();self.update()
+    def plot_rect(self):
+        bottom_margin = 21 if self.jitter else 25
+        return QRectF(48, 10, max(1, self.width()-66), max(1, self.height()-10-bottom_margin))
     def draw_chart(self,p):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.fillRect(self.rect(),QColor('#141d2b'));r=QRectF(48,10,self.width()-66,self.height()-(20 if self.jitter else 35))
+        p.fillRect(self.rect(),QColor('#141d2b'));r=self.plot_rect()
         key='jitter' if self.jitter else 'latency';peak=max([q.get(key) or 0 for q in self.points]+[0])
         maximum=jitter_scale(peak) if self.jitter else max(50,math.ceil(peak*1.15/50)*50)
         x=lambda ts:r.left()+(ts-self.start)/max(1,self.end-self.start)*r.width()
@@ -228,7 +231,7 @@ class Graph(CachedPlot):
             left=max(self.start,begin);right=min(self.end,end or time.time())
             if right>left:p.fillRect(QRectF(x(left),r.top(),x(right)-x(left),r.height()),QColor(37,99,235,45))
         p.setPen(QColor('#91a2bb'))
-        ticks=(3 if self.height()<110 else 5) if self.jitter else (4 if self.height()<160 else 6)
+        ticks=(2 if r.height()<30 else 3 if self.height()<110 else 5) if self.jitter else (4 if self.height()<160 else 6)
         for i in range(ticks):
             v=maximum*i/(ticks-1);yy=y(v)
             p.setPen(QPen(QColor('#2b3a50'),1,Qt.PenStyle.DashLine));p.drawLine(int(r.left()),int(yy),int(r.right()),int(yy))
@@ -268,18 +271,13 @@ class Graph(CachedPlot):
             else:p.drawEllipse(QRectF(xx-1,yy-1,2,2))
             last=(xx,yy,q['ts'])
         if not self.points:p.setPen(QColor('#91a2bb'));p.drawText(r,Qt.AlignmentFlag.AlignCenter,'Ожидаем измерения')
-    def draw_overlay(self,p):
-        if self.cursor is not None:
-            p.setPen(QPen(QColor('#60a5fa'),1,Qt.PenStyle.DashLine))
-            p.drawLine(int(self.cursor),10,int(self.cursor),self.height()-(10 if self.jitter else 25))
     def mouseMoveEvent(self,event):
         if not self.points:return
-        xx=min(self.width()-18,max(48,event.position().x()));ts=self.start+(xx-48)/max(1,self.width()-66)*(self.end-self.start)
-        q=nearest_point(self.points,ts,key=lambda point:point['ts']);self.cursor=xx;self.update()
+        timestamp = self.track_time_cursor(event)
+        q = nearest_point(self.points, timestamp, key=lambda point: point['ts'])
         status=rtt_text(q.get('latency'),2)+' мс' if q['status']=='ok' else {'error':'локальная ошибка проверки','unreachable':'цель недоступна (ICMP)','refused':'соединение отклонено'}.get(q['status'],'нет ответа')
         text=format_timestamp(q['ts'])+' · RTT '+status+' · Jitter '+fmt(q.get('jitter'),2)+' мс'+('\n'+precision_note() if precision_note() else '')
         self.setToolTip(text);self.hover.emit(text)
-    def leaveEvent(self,event):self.cursor=None;self.update()
     def wheelEvent(self,event):self.zoom.emit(1 if event.angleDelta().y()<0 else -1);event.accept()
 
 STYLE='''

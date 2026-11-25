@@ -11,7 +11,7 @@ from linkradar.core import export_transfer
 from linkradar.ui import text_export
 from linkradar.ui.log_widgets import update_lines,format_events
 from linkradar.core.plot_sampling import chart_samples,nearest_point,axis_label,nice_scale
-from linkradar.ui.plot_widgets import CachedPlot
+from linkradar.ui.plot_widgets import TimePlot
 from linkradar.ui.timeline import Timeline
 from linkradar.stream import stream_monitor as engine
 from linkradar.ui.traffic_widgets import capture_icon
@@ -70,11 +70,11 @@ def network_context(reader):
         return ['Не удалось получить свежие сетевые измерения. Повторите создание отчёта.']
 
 
-class SeriesPlot(CachedPlot):
+class SeriesPlot(TimePlot):
     """Time series for one stream; gaps are drawn as gaps, not zeros."""
     def __init__(self,title,series):
-        super().__init__();self.title=title;self.series=series;self.points=[];self.start=0;self.end=1;self.message='Выберите поток';self._samples=None;self._sample_key=None
-        self.setMinimumHeight(120);self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding);self.setMouseTracking(True)
+        super().__init__();self.title=title;self.series=series;self.message='Выберите поток';self._samples=None;self._sample_key=None
+        self.setMinimumHeight(120);self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
     def set_data(self,points,end,period):
         self.end=end;self.start=end-period
         self.points=sorted((point for point in points if self.start<=point[0]<=end),key=lambda point:point[0])
@@ -141,9 +141,8 @@ class SeriesPlot(CachedPlot):
             p.drawText(QRectF(r.left() if i==0 else r.right()-60 if i==ticks-1 else x(ts)-30,r.bottom()+3,60,14),alignment,format_timestamp(ts))
     def mouseMoveEvent(self,event):
         if not self.points:return
-        rect=self.plot_rect();fraction=min(1,max(0,(event.position().x()-rect.left())/rect.width()))
-        ts=self.start+fraction*(self.end-self.start)
-        at,values,state=nearest_point(self.points,ts)
+        timestamp = self.track_time_cursor(event)
+        at,values,state=nearest_point(self.points,timestamp)
         self.setToolTip(format_timestamp(at)+' · '+STATES.get(state,(state,''))[0]+'\n'+'\n'.join(s['label']+': '+fmt(values.get(s['key']),2) for s in self.series))
 
 class ColumnFitter(QObject):
