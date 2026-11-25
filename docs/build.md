@@ -48,6 +48,9 @@ py -3.13 packaging/build_windows.py --iscc "${env:ProgramFiles(x86)}\Inno Setup 
 
 ## macOS arm64
 
+В Actions задание для macOS собирает DMG, запускает приложение в режиме
+`--smoke-test` и загружает DMG как отдельный артефакт.
+
 На Apple Silicon с Xcode Command Line Tools установите зависимости, затем выполните:
 
 ```sh

@@ -1,5 +1,27 @@
 # Память проекта LinkRadar
 
+## Релиз 2.10.14 (25 ноября 2026)
+
+Опубликованы Windows x64 Setup, macOS arm64 DMG и SHA-256. Тег `v2.10.14`
+указывает на коммит `ffd645cdf4e15c6f8ee4191dbebad077ca68fe28`.
+Сборки взяты из успешного прогона для этого коммита. Публичный
+`latest.json` обновлён до 2.10.14 штатным workflow.
+[Релиз](https://github.com/mshnyrev13/linkradar-updates/releases/tag/v2.10.14) ·
+[Сборка и тесты](https://github.com/mshnyrev13/linkradar-updates/actions/runs/45626999504) ·
+[Канал обновлений](https://github.com/mshnyrev13/linkradar-updates/actions/runs/45628350131)
+
+В итоговом локальном прогоне Windows прошли 413 из 445 unit-тестов, 32
+пропущены. Маркер времени проверен в нативном окне на реальных ICMP и
+локальном RTMP с FFmpeg 6, в том числе при zoom и поступлении новых точек.
+В длительной проверке локального SRT LinkRadar собрал 832 отдельных измерения
+за 15 мин 38 с. Скриншоты хранятся вне Git. Подробности в
+[отчёте о проверках](docs/windows-diagnostics.md).
+
+Открытая задача для vMix 28.0.0.42: краткий тайм-аут Statistics → Overview
+может временно убрать активную строку и записать «источник больше не виден».
+Явный `Disconnected` должен по-прежнему обрабатываться сразу.
+[Issue #3](https://github.com/mshnyrev13/linkradar-updates/issues/3)
+
 ## Исправления Windows: навигация и Stream (23 ноября 2026)
 
 Рабочая ветка `fix/windows-diagnostics`: общая Timeline для сети и Stream,
