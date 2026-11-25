@@ -28,7 +28,8 @@ from urllib3.exceptions import HTTPError as TransportError
 OBS_PORT=4455
 VMIX_API='http://127.0.0.1:8088/api'
 # Processes whose TCP connections are treated as encoder traffic.
-ENCODERS={'obs64.exe':'OBS','obs32.exe':'OBS','obs.exe':'OBS','vmix64.exe':'vMix','vmix.exe':'vMix','ndinode.exe':'vMix','ffmpeg.exe':'FFmpeg'}
+ENCODERS={'obs64.exe':'OBS','obs32.exe':'OBS','obs.exe':'OBS','vmix64.exe':'vMix','vmix.exe':'vMix','ndinode.exe':'vMix','ffmpeg.exe':'FFmpeg','ffmpeg2.exe':'FFmpeg','ffmpeg6.exe':'FFmpeg'}
+FFMPEG_ENCODERS={'ffmpeg.exe','ffmpeg2.exe','ffmpeg6.exe'}
 STREAM_OUTPUTS={'simple_stream','adv_stream'}
 RECORD_OUTPUTS={'simple_file_output','adv_file_output','adv_ffmpeg_output'}
 
@@ -216,6 +217,49 @@ class ObsClient:
 
 # --- vMix ------------------------------------------------------------------------
 
+FFMPEG_PROGRESS=re.compile(r'(?:^|[\r\n])frame=\s*(\d+)\s+fps=\s*(\d+(?:[.,]\d+)?)\s+[^\r\n]*?size=\s*(\d+)\s*(kB|KiB|B)\s+time=(\d+):(\d+):(\d+(?:[.,]\d+)?)\s+bitrate=\s*(\d+(?:[.,]\d+)?)\s*(kbits/s|Mbits/s|bits/s)',re.I)
+
+def parse_vmix_progress(text):
+    """Allowlist numbers only: never return the command line, URL or log text."""
+    matches=list(FFMPEG_PROGRESS.finditer(text))
+    if not matches:return None
+    match=matches[-1]
+    if re.search(r'Conversion failed|Exiting normally|av_interleaved_write_frame\(\).*error',text[match.end():],re.I):return None
+    frame,fps,size,unit,hours,minutes,seconds,bitrate,rate_unit=match.groups()
+    seconds=int(hours)*3600+int(minutes)*60+float(seconds.replace(',','.'))
+    return {'frames':int(frame),'fps':float(fps.replace(',','.')),'bytes':int(size)*(1024 if unit.lower()!='b' else 1),
+            'media_seconds':seconds,'bitrate':float(bitrate.replace(',','.'))*{'kbits/s':1,'mbits/s':1000,'bits/s':.001}[rate_unit.lower()]}
+
+def vmix_encoder_logs(folder=None,now=None):
+    """Read at most 64 KiB per fresh channel; old recordings are never replayed."""
+    if folder is None:
+        if sys.platform!='win32':return []
+        folder=Path(os.environ.get('PROGRAMDATA',r'C:\ProgramData'))/'vMix'/'streaming'
+    now=time.time() if now is None else now
+    latest={}
+    try:
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                match=re.fullmatch(r'streaming([1-5])(?:[ ._-].*)?\.log',entry.name,re.I)
+                if not match or not entry.is_file(follow_symlinks=False):continue
+                try:stat=entry.stat(follow_symlinks=False)
+                except OSError:continue
+                if not -1<=now-stat.st_mtime<=10:continue
+                channel=match.group(1)
+                if channel not in latest or stat.st_mtime>latest[channel][0]:latest[channel]=(stat.st_mtime,entry.path,stat.st_size)
+    except FileNotFoundError:return []
+    except OSError:raise SourceError('Нет доступа к журналам энкодера vMix') from None
+    rows=[]
+    for channel,(stamp,path,size) in latest.items():
+        try:
+            with open(path,'rb') as stream:
+                stream.seek(max(0,size-65536));text=stream.read(65536).decode('utf-8','replace')
+            values=parse_vmix_progress(text)
+        except OSError:continue
+        if values:
+            rows.append({'channel':channel,'ts':stamp,'generation':hashlib.sha256(os.fsencode(path)).hexdigest()[:16],**values})
+    return rows
+
 def parse_vmix_xml(text):
     if len(text)>4*1024*1024 or re.search(r'<!\s*(?:DOCTYPE|ENTITY)\b',text,re.I):
         raise SourceError('vMix XML содержит запрещённые объявления или слишком большой ответ')
@@ -270,7 +314,7 @@ def vmix_kind(name):
     lower=name.lower()
     if 'srt' in lower:return 'srt_output' if 'out' in lower else 'srt_input'
     if 'ndi' in lower:return 'ndi'
-    if lower.startswith('output') or lower in ('stream','record','recording','external','fullscreen'):return 'output'
+    if lower.startswith('output') or re.match(r'^(?:stream(?:ing)?|record(?:ing)?|external|fullscreen)(?:\s*[#\d]|$)',lower):return 'output'
     return 'input'
 
 def integer(text):
@@ -327,7 +371,22 @@ def parse_vmix_srt_rows(headers,rows):
     return result
 
 def parse_vmix_list(headers,rows):
-    return parse_vmix_srt_rows(headers,rows) if is_srt_headers(headers) else parse_vmix_rows(headers,rows)
+    if is_srt_headers(headers):return parse_vmix_srt_rows(headers,rows)
+    # vMix 28 adds Encoders. Its Source is a name (e.g. Output 1),
+    # not Overview's Source Dropped counter.
+    columns=[(h or '').strip().lower() for h in headers]
+    if {'codec','resolution','fps','dropped frames'}<=set(columns):
+        result=[]
+        for raw in rows:
+            raw=[safe_name(t) if i==0 else safe_text(t) for i,t in enumerate(raw)]
+            values=dict(zip(columns,raw))
+            result.append({'name':values.get('name',''),'kind':'encoder','video':' · '.join(f'{h}: {t}' for h,t in zip(headers[1:],raw[1:]) if t),
+                           'audio':'','raw':raw,'fps':number(values.get('fps')),'encoder_dropped':integer(values.get('dropped frames')),
+                           'source_dropped':None,'renderer_dropped':None,'resync':None,'queue':None})
+        return result
+    # Unknown named tables must never be guessed as Overview counters.
+    if headers and not any('dropped' in h for h in columns):return []
+    return parse_vmix_rows(headers,rows)
 
 COUNTERS=('source_dropped','renderer_dropped','fullscreen_dropped','audio_dropped','audio_resampled')
 
@@ -370,14 +429,26 @@ if sys.platform=='win32':
                   ('fmt',ctypes.c_int),('lParam',ctypes.c_ssize_t),('iImage',ctypes.c_int),('iOrder',ctypes.c_int),('type',wintypes.UINT),
                   ('pvFilter',ctypes.c_void_p),('state',wintypes.UINT)]
 
-def process_name(pid):
+def process_image(pid):
     if sys.platform!='win32' or not pid:return ''
     handle=kernel32.OpenProcess(0x1000,False,pid)
     if not handle:return ''
     try:
         size=wintypes.DWORD(1024);buffer=ctypes.create_unicode_buffer(1024)
-        return os.path.basename(buffer.value).lower() if kernel32.QueryFullProcessImageNameW(handle,0,buffer,ctypes.byref(size)) else ''
+        return buffer.value if kernel32.QueryFullProcessImageNameW(handle,0,buffer,ctypes.byref(size)) else ''
     finally:kernel32.CloseHandle(handle)
+
+def process_name(pid):
+    return os.path.basename(process_image(pid)).lower()
+
+def encoder_app(name,image,processes):
+    # vMix ships ffmpeg.exe, ffmpeg2.exe and ffmpeg6.exe. A standalone
+    # FFmpeg must retain its own identity; only the vMix installation is linked.
+    if name in FFMPEG_ENCODERS and image:
+        path=Path(image)
+        if path.parent.name.lower()=='streaming' and any((path.parent.parent/exe).is_file() for exe in ('vMix64.exe','vMix.exe')):
+            return 'vMix'
+    return processes[name]
 
 def _windows(parent=None):
     found=[]
@@ -416,7 +487,7 @@ class RemoteBuffer:
 def find_statistics_window(processes=('vmix64.exe','vmix.exe'),title='Statistics'):
     """(pid, list views) of the Statistics window, the visible list first.
 
-    vMix keeps one list per tab (Overview, SRT); the hidden one stays a child window.
+    vMix keeps one list per tab; hidden lists remain children but stop updating.
     """
     for hwnd in _windows():
         if not user32.IsWindowVisible(hwnd) or title.lower() not in _text(hwnd,user32.GetWindowTextW).lower():continue
@@ -452,7 +523,10 @@ def vmix_statistics(processes=('vmix64.exe','vmix.exe'),title='Statistics'):
     found=find_statistics_window(processes,title)
     if not found:return None
     pid,lists=found;rows=[]
-    for hwnd in lists:rows+=parse_vmix_list(*read_list_view(pid,hwnd))
+    for hwnd in lists:
+        # vMix 28 freezes hidden tabs. Reading them would timestamp old
+        # bandwidth/RTT and counters as new measurements on every poll.
+        if user32.IsWindowVisible(hwnd):rows+=parse_vmix_list(*read_list_view(pid,hwnd))
     return rows
 
 # Encoder TCP connections. ESTATS bytes/RTT need collection enabled, which Windows
@@ -554,7 +628,8 @@ def encoder_connections(ndi_endpoints=(),processes=None,exclude_pids=(),estats=T
         protocol=classify_connection(conn,ndi_endpoints)
         # Loopback is the control plane (WebSocket/API) unless it carries NDI.
         if is_loopback(conn['remote']) and protocol!='NDI':continue
-        conn={**conn,'process':name,'app':processes[name],'protocol':protocol}
+        app=encoder_app(name,process_image(conn['pid']) if name in FFMPEG_ENCODERS else '',processes)
+        conn={**conn,'process':name,'app':app,'protocol':protocol}
         conn['estats']=tcp_estats(conn) if estats else None
         conn.pop('row');result.append(conn)
     return result

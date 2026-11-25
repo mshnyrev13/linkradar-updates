@@ -136,7 +136,7 @@ class PortPlot(CachedPlot):
         r=self.plot_rect();ts=self.cursor
         if not self.data['begin']<=ts<=self.data['end']:return
         xx=r.left()+(ts-self.data['begin'])/max(1,self.data['end']-self.data['begin'])*r.width()
-        p.setPen(QPen(QColor('#60a5fa'),1,Qt.PenStyle.DashLine));p.drawLine(int(xx),int(r.top()),int(xx),int(r.bottom()))
+        self.draw_time_cursor(p,r,xx,ts)
     def mouseMoveEvent(self,event):
         if not self.data:return
         rect=self.plot_rect();fraction=min(1,max(0,(event.position().x()-rect.left())/rect.width()))

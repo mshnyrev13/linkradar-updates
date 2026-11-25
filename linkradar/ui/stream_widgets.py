@@ -11,19 +11,20 @@ from linkradar.core import export_transfer
 from linkradar.ui import text_export
 from linkradar.ui.log_widgets import update_lines,format_events
 from linkradar.core.plot_sampling import chart_samples,nearest_point,axis_label,nice_scale
-from linkradar.ui.plot_widgets import CachedPlot
+from linkradar.ui.plot_widgets import TimePlot
+from linkradar.ui.timeline import Timeline
 from linkradar.stream import stream_monitor as engine
 from linkradar.ui.traffic_widgets import capture_icon
 from linkradar.ui.ui_tasks import Call
 
 PERIODS=[(60,'1 мин'),(300,'5 мин'),(900,'15 мин'),(1800,'30 мин'),(3600,'1 час'),(10800,'3 часа'),(43200,'12 часов')]
 STATES={'live':('В ЭФИРЕ','#22c55e'),'reconnecting':('ПЕРЕПОДКЛЮЧЕНИЕ','#ef6275'),'connected':('подключено','#60a5fa'),'found':('обнаружен','#91a2bb'),
-        'off':('остановлен','#91a2bb'),'lost':('пропал','#f59e0b')}
+        'off':('остановлен','#91a2bb'),'lost':('пропал','#f59e0b'),'disconnected':('нет соединения','#f59e0b')}
 LEVEL_COLORS=('#dce6f4','#f4cd35','#ef6275')
 COLUMNS=['Источник','Протокол','Назначение','Состояние','В эфире','Битрейт','FPS','Потеряно','Потери/с','Буфер','RTT','Повторы, %','Примечание']
 COLUMN_TIPS=['','','Сервер приёма без ключа или адрес соединения','','Длительность эфира','Битрейт, кбит/с','Кадров в секунду',
              'Потеряно кадров всего (доля, %)','Среднее число потерянных кадров в секунду между двумя свежими опросами; после паузы нужен новый замер','Congestion OBS 0–1: заполненность буфера отправки',
-             'RTT TCP до сервера приёма, мс','Повторно отправленные TCP-сегменты, %','']
+             'RTT до сервера приёма, мс: TCP либо SRT по источнику строки','Повторно отправленные TCP-сегменты, %','']
 COLUMN_WIDTHS=[170,80,220,110,70,80,50,110,70,70,55,70,220]
 VMIX_COLUMNS=['vMix Statistics','Тип','Source','Renderer','Resync','Queue','Видео / аудио','Δ за опрос']
 VMIX_WIDTHS=[160,80,60,70,60,60,260,170]
@@ -35,8 +36,16 @@ def fmt(value,digits=0):return engine.fmt(value,digits)
 def missing_metric_message(stream,status,keys,remote_vmix=False):
     """Explain missing source data, without turning absence into zero or loss."""
     if not stream:return 'Выберите поток в таблице'
+    if stream.get('state')=='disconnected':return 'vMix сообщает: нет соединения SRT'
     if stream.get('state') in ('off','lost'):return 'Нет свежих данных: поток остановлен или источник недоступен'
     key=stream['key']
+    if key.startswith('vmix:encoder:'):
+        return 'Журнал FFmpeg сообщает битрейт и FPS; потери сети, буфер OBS и TCP RTT в нём отсутствуют'
+    if key.startswith('vmix:srt:'):
+        if 'dropped_rate' in keys:return 'SRT сообщает потери пакетов, а не кадров; показатель — в примечании строки'
+        return 'Показатель SRT доступен в vMix Statistics → SRT; буфер OBS к нему не относится'
+    if key.startswith('vmix:stat:') and str(stream.get('protocol','')).startswith('SRT') and ('bitrate' in keys or 'rtt' in keys):
+        return 'Откройте vMix Statistics → SRT и выберите строку с протоколом SRT для битрейта и RTT'
     if key.startswith('vmix:'):
         if 'dropped_rate' in keys:
             if remote_vmix:return 'Потери кадров доступны через Statistics на компьютере с vMix'
@@ -61,11 +70,11 @@ def network_context(reader):
         return ['Не удалось получить свежие сетевые измерения. Повторите создание отчёта.']
 
 
-class SeriesPlot(CachedPlot):
+class SeriesPlot(TimePlot):
     """Time series for one stream; gaps are drawn as gaps, not zeros."""
     def __init__(self,title,series):
-        super().__init__();self.title=title;self.series=series;self.points=[];self.start=0;self.end=1;self.message='Выберите поток';self._samples=None;self._sample_key=None
-        self.setMinimumHeight(120);self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding);self.setMouseTracking(True)
+        super().__init__();self.title=title;self.series=series;self.message='Выберите поток';self._samples=None;self._sample_key=None
+        self.setMinimumHeight(120);self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
     def set_data(self,points,end,period):
         self.end=end;self.start=end-period
         self.points=sorted((point for point in points if self.start<=point[0]<=end),key=lambda point:point[0])
@@ -132,15 +141,14 @@ class SeriesPlot(CachedPlot):
             p.drawText(QRectF(r.left() if i==0 else r.right()-60 if i==ticks-1 else x(ts)-30,r.bottom()+3,60,14),alignment,format_timestamp(ts))
     def mouseMoveEvent(self,event):
         if not self.points:return
-        rect=self.plot_rect();fraction=min(1,max(0,(event.position().x()-rect.left())/rect.width()))
-        ts=self.start+fraction*(self.end-self.start)
-        at,values,state=nearest_point(self.points,ts)
+        timestamp = self.track_time_cursor(event)
+        at,values,state=nearest_point(self.points,timestamp)
         self.setToolTip(format_timestamp(at)+' · '+STATES.get(state,(state,''))[0]+'\n'+'\n'.join(s['label']+': '+fmt(values.get(s['key']),2) for s in self.series))
 
 class ColumnFitter(QObject):
     """Columns resizable by the user; window width is shared in the user's proportions."""
     def __init__(self,table,widths):
-        super().__init__(table);self.table=table;self.weights=list(widths);self.fitting=False
+        super().__init__(table);self.table=table;self.weights=list(widths);self.fitting=False;self.manual=False
         header=table.horizontalHeader();header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive);header.setStretchLastSection(False)
         header.setMinimumSectionSize(36);header.setSectionsMovable(False)
         # Automatic fitting never cuts a header; a narrow window gets a horizontal scroll bar.
@@ -153,13 +161,18 @@ class ColumnFitter(QObject):
         return False
     def resized(self,*args):
         # A drag or a double-click autofit on the divider becomes the new proportion.
-        if not self.fitting:self.weights=[self.table.columnWidth(i) for i in range(self.table.columnCount())]
+        if not self.fitting:
+            self.weights=[self.table.columnWidth(i) for i in range(self.table.columnCount())];self.manual=True
     def fit(self):
         available=self.table.viewport().width();total=sum(self.weights)
         if available<=0 or total<=0:return
         # Reserve headers which cannot fit their proportional share, then divide
         # the remaining width. Clamping just the last column caused overflow.
         remaining=max(available,sum(self.minimums));active=list(range(len(self.weights)));widths=[0]*len(active)
+        if self.manual and available<sum(self.minimums):
+            # There is already a horizontal scrollbar. Preserve the user's
+            # expanded columns instead of collapsing every column to its header.
+            remaining=max(remaining,sum(max(m,w) for m,w in zip(self.minimums,self.weights)))
         while active:
             weight=sum(self.weights[i] for i in active)
             fixed=[i for i in active if remaining*self.weights[i]/weight<self.minimums[i]]
@@ -222,6 +235,7 @@ class StreamPanel(QWidget):
         row=QHBoxLayout();row.setSpacing(5)
         for plot in self.plots:row.addWidget(plot,1)
         charts_layout.addLayout(row,1)
+        self.timeline=Timeline();self.timeline.changed.connect(self.refresh);charts_layout.addWidget(self.timeline)
         self.vmix_table=QTableWidget(0,len(VMIX_COLUMNS));self.vmix_table.setHorizontalHeaderLabels(VMIX_COLUMNS)
         self.vmix_table.verticalHeader().hide();self.vmix_table.verticalHeader().setDefaultSectionSize(20);self.vmix_table.setAlternatingRowColors(True);self.vmix_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.vmix_table.setStyleSheet('QTableWidget{font-size:11px;} QHeaderView::section{padding:3px;}');self.vmix_columns=ColumnFitter(self.vmix_table,VMIX_WIDTHS)
@@ -255,7 +269,8 @@ class StreamPanel(QWidget):
         self.live.setText('ЗАВЕРШАЕМ…' if stopping else '● LIVE' if running else 'ПАУЗА' if self.monitor.started else 'ОСТАНОВЛЕНО')
     def refresh(self,*args):
         if self.closing:return
-        self.data=self.monitor.snapshot(self.period.currentData(),key=self.selected);self.render(self.data)
+        now=self.monitor.clock();self.timeline.set_bounds(self.monitor.started or now,now,self.period.currentData())
+        self.data=self.monitor.snapshot(self.period.currentData(),key=self.selected,focus_end=self.timeline.focus_end);self.render(self.data)
     def refresh_visible(self):
         if self.isVisible():self.refresh()
         elif not self.closing:
@@ -275,7 +290,7 @@ class StreamPanel(QWidget):
         # Short-lived TCP connections leave the table a minute after closing.
         return [s for s in data['streams'] if not (s['key'].startswith('tcp:') and s['state']=='lost' and now-s.get('last_seen',now)>60)]
     def render(self,data):
-        names={'obs':'OBS','vmix_api':'vMix API','vmix_stats':'vMix Statistics','tcp':'TCP','ndi':'NDI'};parts=[]
+        names={'obs':'OBS','vmix_api':'vMix API','vmix_stats':'vMix Statistics','vmix_log':'vMix FFmpeg log','tcp':'TCP','ndi':'NDI'};parts=[]
         has_vmix=any(s['key'].startswith('vmix:') and s['state'] in ('live','connected','reconnecting') for s in data['streams'])
         has_obs=any(s['key'].startswith('obs:') for s in data['streams'])
         self.sources.setToolTip('\n'.join(names[key]+': '+status['text'] for key,status in data['status'].items()))
@@ -317,7 +332,7 @@ class StreamPanel(QWidget):
         except ValueError:remote_vmix=True
         for plot in self.plots:
             plot.message=missing_metric_message(stream,data['status'],{s['key'] for s in plot.series},remote_vmix)
-            plot.set_data(points,data['now'],self.period.currentData())
+            plot.set_data(points,data.get('chart_end',data['now']),self.period.currentData())
             has_values=any(point[1].get(series['key']) is not None for point in plot.points for series in plot.series)
             plot.setToolTip('Наведите на график для значений в выбранный момент' if has_values else plot.message)
         rows=data.get('vmix_rows') or []

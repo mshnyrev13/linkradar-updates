@@ -18,10 +18,10 @@ HISTORY_SECONDS=12*3600
 # Attention levels: OBS draws congestion from green to red over 0..1; dropped/skipped
 # frames above ~1% are visible to viewers; TCP RTT/retransmissions describe the path.
 LIMITS={'drop_pct':(.1,1),'congestion':(.1,.5),'rtt':(150,300),'retrans_pct':(1,3)}
-SECTIONS=('obs','vmix_api','vmix_stats','tcp','ndi')
+SECTIONS=('obs','vmix_api','vmix_stats','vmix_log','tcp','ndi')
 UNSET=object()
 CLOSED=object()
-STATE_TEXT={'live':'в эфире','reconnecting':'переподключение','connected':'подключено','found':'обнаружен','off':'остановлен','lost':'пропал'}
+STATE_TEXT={'live':'в эфире','reconnecting':'переподключение','connected':'подключено','disconnected':'нет соединения','found':'обнаружен','off':'остановлен','lost':'пропал'}
 
 def level(metric,value):
     if value is None:return 0
@@ -69,6 +69,7 @@ class StreamMonitor:
             self.status={key:{'state':'off','text':'не опрашивается'} for key in SECTIONS}
             self.streams={};self.history={};self.events=deque(maxlen=5000);self.vmix_rows=[];self.ndi=[];self.obs_engine={};self.vmix_info={}
             self.counters={};self.vmix_sample_at=None;self.started=None;self.last_poll=None;self.cycle_now=None;self.obs_seen=set();self.vmix_seen=set();self.ndi_seen=set();self.stats_seen=set();self.tcp_seen=set();self.source_times={}
+            self.log_seen=set()
             # Results of slow reads that are still running belong to the old generation.
             self.generation+=1;self.jobs={}
     @property
@@ -138,14 +139,16 @@ class StreamMonitor:
                         if self.generation==generation and self.jobs.get(name) is job:job['result']=value
                 job['thread']=threading.Thread(target=work,name='stream-'+name,daemon=True);job['thread'].start()
             return result
-    def cycle(self,now=None,obs=UNSET,vmix_api=UNSET,vmix_rows=UNSET,connections=UNSET,ndi=UNSET):
+    def cycle(self,now=None,obs=UNSET,vmix_api=UNSET,vmix_rows=UNSET,connections=UNSET,ndi=UNSET,vmix_logs=UNSET):
         """One poll. Tests pass source results directly; UNSET reads the real source."""
         now=now or self.clock();seen=set();updated=set()
         settings=dict(self.settings)
+        real_vmix=vmix_api is UNSET
+        if vmix_logs is UNSET:vmix_logs=self.fetch('vmix_log',sources.vmix_encoder_logs,1,now) if real_vmix else None
         if obs is UNSET:obs=self.fetch('obs',self.read_obs,1,now)
         if vmix_api is UNSET:vmix_api=self.fetch('vmix_api',lambda:sources.vmix_api(settings['vmix_url']),2,now)
         if ndi is UNSET:ndi=self.fetch('ndi',sources.discover_ndi,15,now) if settings['ndi'] else None
-        if vmix_rows is UNSET:vmix_rows=self.fetch('vmix_stats',lambda:sources.vmix_statistics() or CLOSED,1,now)
+        if vmix_rows is UNSET:vmix_rows=self.fetch('vmix_stats',lambda:CLOSED if (rows:=sources.vmix_statistics()) is None else rows,1,now)
         else:
             if vmix_rows is None:vmix_rows=CLOSED
         with self.lock:
@@ -164,7 +167,9 @@ class StreamMonitor:
                 self.stats_seen=self.update_vmix_rows(now,None if vmix_rows is CLOSED else vmix_rows);updated|=self.stats_seen;self.source_times['vmix_stats']=now
             if connections is not None:
                 self.tcp_seen=self.update_tcp(now,connections);updated|=self.tcp_seen;self.source_times['tcp']=now
-            for section,attr,timeout in (('obs','obs_seen',15),('vmix_api','vmix_seen',15),('vmix_stats','stats_seen',15),('tcp','tcp_seen',15),('ndi','ndi_seen',45)):
+            if vmix_logs is not None:
+                self.log_seen=self.update_vmix_logs(now,vmix_logs);updated|={k for k in self.log_seen if self.streams[k]['last_seen']==now};self.source_times['vmix_log']=now
+            for section,attr,timeout in (('obs','obs_seen',15),('vmix_api','vmix_seen',15),('vmix_stats','stats_seen',15),('vmix_log','log_seen',10),('tcp','tcp_seen',15),('ndi','ndi_seen',45)):
                 if now-self.source_times.get(section,now)>timeout:
                     setattr(self,attr,set());self.status[section]={'state':'error','text':'нет свежих данных'}
                 seen|=getattr(self,attr)
@@ -280,6 +285,8 @@ class StreamMonitor:
             if not data.get(flag) and key not in self.streams:continue
             note='каналы: '+', '.join(data.get('streaming_channels',[])) if flag=='streaming' and data.get('streaming_channels') else ''
             self.stream(key,now,label=label,source='vMix',protocol=protocol,target='',state='live' if data.get(flag) else 'off',active=bool(data.get(flag)),note=note);seen.add(key)
+            if flag=='streaming' and not data.get(flag):
+                self.streams[key].update(bitrate=None,fps=None,rtt=None,retrans_pct=None)
         for item in data.get('inputs',[]):
             if not sources.STREAM_INPUT.search(item['type']):continue
             key='vmix:input:'+str(item['number']);seen.add(key)
@@ -314,11 +321,31 @@ class StreamMonitor:
                             note=' · '.join(p for p in ('потери пакетов '+f'{loss:g} %' if loss is not None else '','длительность '+row['duration'] if row.get('duration') else '') if p))
             elif row['kind'] in ('srt_input','srt_output','output','ndi'):
                 key='vmix:stat:'+row['name'];seen.add(key)
+                disconnected=row['kind'] in ('srt_input','srt_output') and row.get('video','').strip().casefold().startswith('disconnected')
                 self.stream(key,now,label='vMix · '+row['name'],source='vMix Statistics',protocol={'srt_input':'SRT вход','srt_output':'SRT выход','output':'Выход','ndi':'NDI'}[row['kind']],
-                            target=row.get('endpoint',''),state='connected',active=True,dropped_delta=lost,
-                            dropped_rate=lost/seconds if lost is not None and seconds>0 else None,
+                            target=row.get('endpoint',''),state='disconnected' if disconnected else 'connected',active=not disconnected,dropped_delta=None if disconnected else lost,
+                            dropped_rate=lost/seconds if not disconnected and lost is not None and seconds>0 else None,
                             frames_dropped=sum(row.get(k) or 0 for k in ('source_dropped','renderer_dropped','fullscreen_dropped')),latency=row.get('latency_ms'),
                             note=('аудиобуфер '+str(row['audio_buffer_ms'])+' мс' if row.get('audio_buffer_ms') is not None else ''))
+        return seen
+    def update_vmix_logs(self,now,rows):
+        if isinstance(rows,Exception):
+            self.status['vmix_log']={'state':'error','text':str(rows)};return set()
+        self.status['vmix_log']={'state':'ok' if rows else 'off','text':f'{len(rows)} свежих каналов' if rows else 'нет свежих журналов FFmpeg'}
+        seen=set()
+        for row in rows:
+            if not -1<=now-row['ts']<=10:continue
+            key='vmix:encoder:'+row['channel']
+            signature=(row['generation'],row['frames'],row['media_seconds'])
+            counters=self.counters.setdefault(key,{})
+            if counters.get('progress')==signature:
+                if now-self.streams[key]['last_seen']<=10:seen.add(key)
+                continue
+            seen.add(key)
+            counters['progress']=signature
+            self.stream(key,now,label='vMix · Энкодер '+row['channel'],source='vMix FFmpeg log',protocol='RTMP/RTMPS',target='',state='connected',active=True,
+                        bitrate=row['bitrate'],fps=row['fps'],frames_total=row['frames'],
+                        note='Средний битрейт кодировщика по журналу FFmpeg; не TCP goodput. Потери сети и RTT журнал не сообщает.')
         return seen
     def update_tcp(self,now,connections):
         if not self.set_status('tcp',connections,''):return set()
@@ -353,16 +380,25 @@ class StreamMonitor:
         for key,app in (('obs:stream','OBS'),('vmix:stream','vMix')):
             stream=self.streams.get(key)
             if not stream or stream['state'] not in ('live','reconnecting'):continue
+            if app=='vMix':
+                stream['note']=stream.get('note','').split(' · Битрейт из журнала FFmpeg')[0]
+                stream['fps']=None
             try:local=sources.is_loopback(self.settings['obs_host']) if app=='OBS' else sources.is_loopback(sources.urllib.parse.urlsplit(self.settings['vmix_url']).hostname)
             except ValueError:local=False
             if not local:
+                if app=='vMix':stream['bitrate']=None
                 stream.pop('tcp_target',None);stream['rtt']=None;stream['retrans_pct']=None;continue
             candidates=[s for k,s in self.streams.items() if k.startswith('tcp:'+app+':') and s['state']=='connected' and s['protocol'] in ('RTMP','RTMPS/HTTPS')]
-            if not candidates:
-                stream.pop('tcp_target',None);stream['rtt']=None;stream['retrans_pct']=None;continue
-            best=max(candidates,key=lambda s:s.get('bitrate') or 0)
-            stream['rtt']=best.get('rtt');stream['retrans_pct']=best.get('retrans_pct');stream['tcp_target']=best['target']
-            if stream.get('bitrate') is None and best.get('bitrate'):stream['bitrate']=best['bitrate']
+            best=max(candidates,key=lambda s:s.get('bitrate') or 0) if candidates else {}
+            stream['rtt']=best.get('rtt');stream['retrans_pct']=best.get('retrans_pct')
+            stream.pop('tcp_target',None)
+            if best:stream['tcp_target']=best['target']
+            if app=='vMix' or stream.get('bitrate') is None:stream['bitrate']=best.get('bitrate')
+            if app=='vMix' and stream.get('bitrate') is None:
+                logs=[self.streams[k] for k in self.log_seen if self.streams[k]['state']=='connected' and (self.cycle_now or self.clock())-self.streams[k]['last_seen']<=10]
+                if len(logs)==1:
+                    stream['bitrate']=logs[0].get('bitrate');stream['fps']=logs[0].get('fps')
+                    stream['note']+=' · Битрейт из журнала FFmpeg (средний битрейт кодировщика, не TCP goodput)'
     def sample(self,key,now):
         stream=self.streams[key]
         self.history[key].append((now,{k:stream.get(k) for k in ('bitrate','dropped_delta','dropped_rate','rtt','congestion','retrans_pct','fps')},stream['state']))
@@ -380,13 +416,14 @@ class StreamMonitor:
         now=self.clock() if now is None else now
         with self.lock:points=[p for p in self.history.get(key,()) if now-min(period,self.history_seconds)<=p[0]<=now]
         return summarize(points)
-    def snapshot(self,period=300,key=None):
+    def snapshot(self,period=300,key=None,focus_end=None):
         """Current state; history only for the selected stream to keep refresh cheap."""
         with self.lock:
             now=self.clock();self.prune(now)
+            end=now if focus_end is None else min(now,max(now-self.history_seconds,focus_end))
             return {'running':self.running,'status':{k:dict(v) for k,v in self.status.items()},'streams':[dict(s) for s in self.streams.values()],
-                    'history':{k:[p for p in v if now-min(period,self.history_seconds)<=p[0]<=now] for k,v in self.history.items() if k==key},'events':[e for e in self.events if e['ts']<=now],
-                    'vmix_rows':[dict(r) for r in self.vmix_rows],'ndi':list(self.ndi),'obs':dict(self.obs_engine),'now':now,'started':self.started}
+                    'history':{k:[p for p in v if end-min(period,self.history_seconds)<=p[0]<=end] for k,v in self.history.items() if k==key},'events':[e for e in self.events if e['ts']<=now],
+                    'vmix_rows':[dict(r) for r in self.vmix_rows],'ndi':list(self.ndi),'obs':dict(self.obs_engine),'now':now,'chart_end':end,'started':self.started}
     def report(self,period=3600,network=None,now=None):
         """Plain-text report for a CDN/video service. No stream keys or passwords."""
         with self.lock:
@@ -403,7 +440,7 @@ class StreamMonitor:
                f'Период: {local(begin)} — {local(now)} · {duration(now-begin)}',
                'Компьютер: '+socket.gethostname()+' · '+sys.platform,'',
                'Источники данных:']
-        names={'obs':'OBS','vmix_api':'vMix API','vmix_stats':'vMix Statistics','tcp':'TCP энкодеров','ndi':'NDI (mDNS)'}
+        names={'obs':'OBS','vmix_api':'vMix API','vmix_stats':'vMix Statistics','vmix_log':'vMix FFmpeg log','tcp':'TCP энкодеров','ndi':'NDI (mDNS)'}
         lines+=[f"  {names[k]}: {'OK' if v['state']=='ok' else 'нет данных'} · {v['text']}" for k,v in status.items()]
         if obs:
             lines+=['','Кодировщик OBS:',
@@ -427,8 +464,10 @@ class StreamMonitor:
                 lines.append(f"    Кадры: всего {s.get('frames_total') if s.get('frames_total') is not None else '—'} · потеряно {s.get('frames_dropped') if s.get('frames_dropped') is not None else '—'} ({fmt(s.get('drop_pct'),2)}%) · за период {stat['dropped']}")
             if stat['congestion']:lines.append(f"    Congestion (0–1): {triple('congestion',2)}")
             if stat['rtt']:
-                lines.append(f"    TCP RTT, мс: {triple('rtt')} · ретрансмиты: {triple('retrans_pct',2,' %')}")
-                if stat['rtt']['max']<=1 and is_public(s.get('tcp_target') or s.get('target')):lines.append('    RTT ≤1 мс до внешнего адреса: вероятно, локальный VPN/прокси, RTT и ретрансмиты — до него, а не до ingest')
+                if s.get('protocol')=='SRT':lines.append(f"    SRT RTT, мс: {triple('rtt')}")
+                else:
+                    lines.append(f"    TCP RTT, мс: {triple('rtt')} · ретрансмиты: {triple('retrans_pct',2,' %')}")
+                    if stat['rtt']['max']<=1 and is_public(s.get('tcp_target') or s.get('target')):lines.append('    RTT ≤1 мс до внешнего адреса: вероятно, локальный VPN/прокси, RTT и ретрансмиты — до него, а не до ingest')
             if s.get('latency') is not None:lines.append(f"    Задержка vMix: {s['latency']} мс")
             if s.get('note'):lines.append('    Примечание: '+s['note'])
             if s.get('observation_gap'):lines.append('    Наблюдение прерывалось: статистика содержит только известные сегменты; события во время паузы могли быть пропущены.')

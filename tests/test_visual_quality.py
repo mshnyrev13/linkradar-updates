@@ -4,9 +4,11 @@ os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 import sys,time,unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QEvent,QPointF
 from PySide6.QtWidgets import QApplication
+from linkradar.core.time_labels import format_timestamp
 from linkradar.ui import desktop, port_widgets, stream_widgets
 
 def event(x,y=50):return SimpleNamespace(position=lambda:QPointF(x,y))
@@ -26,6 +28,24 @@ class VisualQuality(unittest.TestCase):
   points=[(1000,{'rtt':1},'live'),(1260,{'rtt':2},'live'),(1300,{'rtt':3},'live')]
   chart.set_data(points,1300,300);chart.mouseMoveEvent(event(chart.width()-44))
   self.assertTrue(chart.toolTip().startswith(time.strftime('%H:%M:%S',time.localtime(1300))));self.assertIn('RTT: 3',chart.toolTip());chart.deleteLater()
+ def test_time_cursor_draws_at_pointer_and_tracks_new_axis_without_mouse_motion(self):
+  for chart in (desktop.Graph(),desktop.Graph(True),
+                stream_widgets.SeriesPlot('RTT',[dict(key='rtt',label='RTT',color='#60a5fa')])):
+   with self.subTest(chart=type(chart).__name__,jitter=getattr(chart,'jitter',False)):
+    try:
+     chart.resize(320,chart.minimumHeight()+40)
+     points=[dict(ts=1000,status='ok',latency=10,jitter=1)] if isinstance(chart,desktop.Graph) else [(1000,{'rtt':10},'live')]
+     chart.set_data(points,1060,120)
+     rect=chart.plot_rect();x=rect.center().x()
+     clean=chart.grab().toImage()
+     with patch('linkradar.ui.plot_widgets.format_timestamp',wraps=format_timestamp) as label:
+      chart.mouseMoveEvent(event(x,rect.center().y()));hover=chart.grab().toImage()
+      label.assert_called_with(1000)
+      self.assertNotEqual(hover.pixelColor(int(x),int(rect.bottom())+4),clean.pixelColor(int(x),int(rect.bottom())+4))
+      chart.set_data(points,1070,120);chart.grab();label.assert_called_with(1010)
+      chart.set_data(points,1050,100);chart.mouseMoveEvent(event(chart.width()-1));chart.grab();label.assert_called_with(1050)
+      chart.leaveEvent(QEvent(QEvent.Type.Leave));label.reset_mock();chart.grab();label.assert_not_called()
+    finally:chart.deleteLater()
  def test_submillisecond_jitter_has_visible_vertical_range(self):
   chart=desktop.Graph(True);chart.resize(500,150);chart.set_data([{'ts':1000+i,'status':'ok','latency':10,'jitter':v} for i,v in enumerate([.05,.2,.4,.7,.1])],1004,4)
   chart.show();self.app.processEvents();image=chart.grab().toImage();ys=[]

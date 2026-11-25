@@ -93,6 +93,8 @@ class TrafficPanel(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(5,QHeaderView.ResizeMode.Stretch);self.table.clicked.connect(self.inspect);layout.addWidget(self.table,1)
         self.table.selectionModel().currentRowChanged.connect(self.current_packet)
         self.details=QPlainTextEdit();self.details.setReadOnly(True);self.details.setFont(QFont('Menlo',10));self.details.setMaximumHeight(62);self.details.hide();layout.addWidget(self.details)
+        self.close_details=QToolButton();self.close_details.setText('Закрыть подробности ×');self.close_details.setAccessibleName('Закрыть подробности пакета')
+        self.close_details.clicked.connect(self.hide_details);self.close_details.hide();layout.addWidget(self.close_details)
         self.setToolTip('Это трафик локального адаптера, а не удалённый захват коммутатора. Для чужого трафика нужен SPAN/mirror.\nСохраняется до 256 байт каждого пакета (заголовки и начало данных); размер — полная длина кадра.\nБуфер ограничен 2 минутами, 50 000 пакетов и 32 МиБ. При нагрузке самые старые записи удаляются раньше. Потери захвата не равны сетевым потерям.')
         self.timer=QTimer(self);self.timer.setInterval(500);self.timer.timeout.connect(self.refresh);self.timer.start();self.refresh()
     def compact_height(self):return self.layout().minimumSize().height()
@@ -112,20 +114,22 @@ class TrafficPanel(QWidget):
     def start(self):
         try:
             if self.engine.state in ('starting','running','paused'):self.engine.pause()
-            elif self.available:self.engine.start(*self.available);self.selected=None;self.details.clear();self.details.hide()
+            elif self.available:self.engine.start(*self.available);self.selected=None;self.details.clear();self.hide_details()
         except ValueError:self.reason='Предыдущий захват завершается'
         self.refresh()
     def stop_capture(self):self.engine.stop();self.reason='Захват остановлен · история до 2 минут';self.refresh()
     def inspect(self,index):
         if not index.isValid() or index.row()>=len(self.model.rows):return
         frame=self.model.rows[index.row()]
-        if frame.number==self.selected:return
+        if frame.number==self.selected and self.details.isVisible():return
         self.selected=frame.number
         lines=[f'{frame.src} → {frame.dst} · {frame.protocol} · {frame.length} Б · сохранено {len(frame.raw)} Б',frame.info]
         for offset in range(0,len(frame.raw),16):
             block=frame.raw[offset:offset+16];chars=''.join(chr(b) if 32<=b<127 else '.' for b in block)
             lines.append(f'{offset:04x}  '+block.hex(' ').ljust(47)+'  '+chars)
-        self.details.setPlainText('\n'.join(lines));self.details.show()
+        self.details.setPlainText('\n'.join(lines));self.details.show();self.close_details.show()
+    def hide_details(self):
+        self.details.hide();self.close_details.hide()
     def current_packet(self,index,previous):
         if self.table.hasFocus():self.inspect(index)
     def refresh(self):
@@ -160,10 +164,10 @@ class TrafficPanel(QWidget):
                 self.model.replace_rows(rows)
                 selected=self.model.row_for(self.selected)
                 if selected is not None:self.table.selectRow(selected)
-                elif self.selected is not None:self.selected=None;self.details.clear();self.details.hide()
+                elif self.selected is not None:self.selected=None;self.details.clear();self.hide_details()
             anchor_row=self.model.row_for(anchor)
             if follow:self.table.scrollToBottom()
             elif anchor_row is not None:self.table.scrollTo(self.model.index(anchor_row,0),QTableView.ScrollHint.PositionAtTop)
             else:bar.setValue(position)
     def shutdown(self):
-        self.closing=True;self.timer.stop();self.engine.close();self.model.beginResetModel();self.model.rows=[];self.model.endResetModel();self.details.clear();self.details.hide()
+        self.closing=True;self.timer.stop();self.engine.close();self.model.beginResetModel();self.model.rows=[];self.model.endResetModel();self.details.clear();self.hide_details()

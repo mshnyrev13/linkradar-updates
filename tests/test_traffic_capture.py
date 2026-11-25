@@ -259,10 +259,10 @@ class CaptureControls(unittest.TestCase):
             self.assertEqual(window.speed_button.parent(),window.speed_readout.parent())
             self.assertEqual(window.speed_button.parent(),window.address.parent())
             self.assertGreater(window.speed_button.mapTo(window,window.speed_button.rect().topLeft()).y(),window.traffic_panel.mapTo(window,window.traffic_panel.rect().bottomLeft()).y())
-            self.assertEqual(window.speed_button.geometry().center().y(),window.speed_readout.geometry().center().y())
+            self.assertEqual(window.speed_button.geometry().top(),window.speed_readout.geometry().top())
             self.assertLess(window.speed_button.geometry().right(),window.speed_readout.geometry().left())
             self.assertLessEqual(window.speed_readout.geometry().right(),window.address.parent().width())
-            self.assertLessEqual(window.speed_button.parent().height()-window.speed_button.geometry().bottom(),2)
+            self.assertLessEqual(window.speed_ping.parent().height()-window.speed_ping.geometry().bottom(),2)
             close_window(window);window.store.db.close();window.deleteLater();QCoreApplication.sendPostedEvents(None,QEvent.Type.DeferredDelete);gc.collect()
 
 

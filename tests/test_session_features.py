@@ -70,6 +70,8 @@ class Controls(unittest.TestCase):
  def test_graphene_height_resizes_and_polls_every_five_seconds(self):
   with tempfile.TemporaryDirectory() as folder,patch.object(desktop.Discovery,'start'),managed_window(desktop.Window(Path(folder))) as w:
    w.show();settle_layout(self.app);before=w.port_panel.plots[0].height()
+   if sys.platform=='win32':
+    self.assertTrue(w.port_panel.isHidden());self.assertFalse(w.port_panel.timer.isActive());self.assertFalse(w.port_panel.clock.isActive());return
    w.port_splitter.setSizes([300,500]);self.app.processEvents()
    self.assertGreater(w.port_panel.plots[0].height(),before);self.assertEqual(w.port_panel.timer.interval(),5000)
    self.assertGreater(w.speed_button.mapTo(w,w.speed_button.rect().topLeft()).y(),w.address.mapTo(w,w.address.rect().topLeft()).y())
@@ -96,6 +98,10 @@ class BackgroundService(unittest.TestCase):
    try:
     config=server.validate_config({'targets':[{'host':'ya.ru'}]});sid=proxy.start(config)
     second=background_engine.connect(folder);self.assertEqual(second.sid,sid)
+    first=second.snapshot(sid,300,compact=True);focus=first['session']['started']
+    time.sleep(.02)
+    historical=second.snapshot(sid,300,compact=True,focus_end=focus)
+    self.assertEqual(historical['session']['analysis_end'],focus)
     result=background_engine.request(folder,'export',sid=sid);self.assertIn(sid,result)
     with patch.object(desktop.Discovery,'start'):
      window=desktop.Window(Path(folder))

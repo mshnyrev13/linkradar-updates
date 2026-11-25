@@ -78,6 +78,18 @@ OBS_RESPONSES={'GetVersion':{'obsVersion':'32.1.2','obsWebSocketVersion':'5.6.0'
     'GetOutputStatus':{'outputActive':True,'outputBytes':0,'outputSkippedFrames':0,'outputTotalFrames':10}}
 
 class Sources(unittest.TestCase):
+    def test_vmix28_encoders_source_name_is_not_a_dropped_counter(self):
+        headers=['Name','Source','Audio','Resolution','Codec','FPS','Dropped Frames']
+        rows=sources.parse_vmix_list(headers,[['Stream1','Output 1','Master','1280x720','H264 (Software)','-',''],
+                                             ['Output 2','Output 2','Bus A','1920x1080','H264 (NVIDIA)','29.97','4']])
+        self.assertEqual([r['kind'] for r in rows],['encoder','encoder'])
+        self.assertTrue(all(r['source_dropped'] is None and r['renderer_dropped'] is None for r in rows))
+        self.assertIsNone(rows[0]['fps']);self.assertIsNone(rows[0]['encoder_dropped'])
+        self.assertEqual((rows[1]['fps'],rows[1]['encoder_dropped']),(29.97,4))
+        monitor=stream_monitor.StreamMonitor()
+        self.assertEqual(monitor.update_vmix_rows(100,rows),set())
+        self.assertEqual(monitor.streams,{})
+        self.assertEqual(sources.parse_vmix_list(['Name','Format'],[['Stream1','H264']]),[])
     def test_safe_url_never_keeps_keys_credentials_or_srt_parameters(self):
         self.assertEqual(sources.safe_url('rtmp://user:pw@a.rtmp.youtube.com/live2/abcd-efgh-key'),'rtmp://a.rtmp.youtube.com')
         self.assertEqual(sources.safe_url('srt://10.0.0.5:9000?streamid=#!::r=live/key,m=publish&passphrase=secret'),'srt://10.0.0.5:9000')
@@ -213,7 +225,10 @@ $f.Controls.Add($s);$f.Controls.Add($l);$f.Add_Shown({$s.Visible=$false});$t=New
             rows=sources.parse_vmix_list(*sources.read_list_view(pid,lists[0]))
             self.assertEqual(rows[0]['name'],'SRT Cam');self.assertEqual(rows[0]['source_dropped'],4);self.assertEqual(rows[0]['endpoint'],'10.0.0.9:9000');self.assertEqual(rows[0]['audio_dropped'],1)
             with patch.object(sources,'find_statistics_window',return_value=found):rows=sources.vmix_statistics()
-            self.assertEqual([(r['kind'],r['name']) for r in rows],[('srt_input','SRT Cam'),('srt','Output 1')]);self.assertEqual(rows[1]['bandwidth_kbps'],6000)
+            self.assertEqual([(r['kind'],r['name']) for r in rows],[('srt_input','SRT Cam')])
+            # The hidden SRT list is readable but stale, so it is excluded.
+            hidden=sources.parse_vmix_list(*sources.read_list_view(pid,lists[1]))
+            self.assertEqual(hidden[0]['bandwidth_kbps'],6000)
         finally:process.kill();process.wait(5)
     def test_tcp_table_lists_own_connection_and_estats_degrades_without_rights(self):
         server=socket.socket();server.bind(('127.0.0.1',0));server.listen();client=socket.create_connection(server.getsockname());accepted,_=server.accept()
@@ -236,6 +251,31 @@ def obs_data(seconds,bytes_,skipped,active=True,reconnecting=False,congestion=.0
             'service':{'type':'rtmp_custom','server':'rtmp://ingest.example.net','protocol':'RTMP'},'outputs':[]}
 
 class Monitor(unittest.TestCase):
+    def test_vmix_overview_explicit_srt_disconnect_and_recovery(self):
+        monitor=stream_monitor.StreamMonitor()
+        row=lambda video:sources.parse_vmix_rows([],[['SRT Out1','0','0','0','0',video,'']])
+        monitor.update_vmix_rows(100,row('Connected 192.0.2.1:10000'))
+        monitor.update_vmix_rows(101,row('Disconnected'))
+        stream=monitor.streams['vmix:stat:SRT Out1']
+        self.assertEqual(stream['state'],'disconnected');self.assertFalse(stream['active'])
+        self.assertIsNone(stream['dropped_rate']);self.assertEqual(stream['target'],'')
+        monitor.update_vmix_rows(102,row('Connected 192.0.2.1:10000'))
+        self.assertEqual(stream['state'],'connected');self.assertTrue(stream['active'])
+    def test_open_empty_statistics_table_is_not_a_closed_window(self):
+        monitor=stream_monitor.StreamMonitor()
+        with patch.object(sources,'vmix_statistics',return_value=[]),patch.object(monitor,'fetch',side_effect=lambda name,fn,*args:fn()):
+            monitor.cycle(obs=sources.SourceError('not used'),vmix_api={},connections=[],ndi=[],vmix_logs=[])
+        self.assertEqual(monitor.status['vmix_stats'],{'state':'ok','text':'0 строк'})
+    def test_srt_report_uses_srt_rtt_without_tcp_retransmits(self):
+        clock=Clock();monitor=stream_monitor.StreamMonitor(clock=clock)
+        row=sources.parse_vmix_list(['Connection','Duration','Bandwidth (mbps)','Packet Loss (%)','Total Data','RTT (ms)'],
+                                   [['Output 1','00:00:09','4.5','2','5 MB','80']])
+        seen=monitor.update_vmix_rows(clock.now,row)
+        for key in seen:monitor.sample(key,clock.now)
+        report=monitor.report()
+        self.assertIn('SRT RTT, мс: сред 80',report)
+        self.assertNotIn('TCP RTT',report);self.assertNotIn('ретрансмиты:',report)
+        self.assertIn('потери пакетов 2 %',report)
     def poll(self,monitor,clock,obs,**extra):
         clock.now+=1;monitor.cycle(clock.now,obs=obs,vmix_api=extra.get('vmix_api',sources.SourceError('vMix API не отвечает')),vmix_rows=extra.get('vmix_rows'),
                                    connections=extra.get('connections',[]),ndi=extra.get('ndi',[]))
@@ -384,12 +424,16 @@ class Widgets(unittest.TestCase):
             for table in (panel.table,panel.vmix_table):
                 header=table.horizontalHeader()
                 self.assertTrue(all(header.sectionResizeMode(i)==QHeaderView.ResizeMode.Interactive for i in range(table.columnCount())))
-                self.assertLessEqual(abs(sum(table.columnWidth(i) for i in range(table.columnCount()))-table.viewport().width()),1)
+                fitter=panel.columns if table is panel.table else panel.vmix_columns
+                self.assertLessEqual(abs(sum(table.columnWidth(i) for i in range(table.columnCount()))-max(table.viewport().width(),sum(fitter.minimums))),1)
             before=[panel.table.columnWidth(i) for i in range(3)]
             panel.resize(1500,800);self.app.processEvents()
             after=[panel.table.columnWidth(i) for i in range(3)]
-            self.assertTrue(all(b<a for a,b in zip(after,before)))  # every column grows, not only the last
-            self.assertAlmostEqual(after[2]/after[0],before[2]/before[0],delta=.05)
+            self.assertTrue(all(b<=a for a,b in zip(after,before)))
+            self.assertTrue(any(b<a for a,b in zip(after,before)))
+            # Header minima can pin a column while other columns grow.
+            if all(before[i]>panel.columns.minimums[i] for i in (0,2)):
+                self.assertAlmostEqual(after[2]/after[0],before[2]/before[0],delta=.05)
             panel.table.setColumnWidth(0,400);self.app.processEvents()  # user drag
             panel.resize(1200,800);self.app.processEvents()
             self.assertGreater(panel.table.columnWidth(0),panel.table.columnWidth(2))

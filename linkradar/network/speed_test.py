@@ -194,6 +194,17 @@ class SpeedTest:
         result={'interface':self.interface,'dns':'OS resolver','provider':'Яндекс CDN',
                 'parallel':self.parallel,'method':'HTTP payload; upload confirmed by server',
                 'download':None,'upload':None,'errors':{},'ts':time.time()}
+        # Independent of a manually started monitoring session. Keep adapter binding.
+        from linkradar.core import server
+        host=None
+        for direction in ('download','upload'):
+            try:host=urllib.parse.urlsplit(probes(config,direction)[0]).hostname;break
+            except ValueError:continue
+        if host:
+            ping=server.probe({'host':host,'mode':'icmp','family':'auto'},1,interface=self.interface,stop=self.stop)
+            if self.stop.is_set():raise Cancelled()
+            result['ping']={'host':host,'latency':ping.get('latency'),'status':ping['status']}
+            self.progress({'phase':'ping',**result['ping']})
         for direction in ['download','upload']:
             try:result[direction]=self.phase(direction,probes(config,direction))
             except Cancelled:raise
